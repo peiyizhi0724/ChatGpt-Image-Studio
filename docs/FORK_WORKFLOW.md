@@ -40,7 +40,7 @@ Run these commands on the server so the deployed code tracks your fork instead o
 
 ```bash
 cd /opt/projects/ChatGpt-Image-Studio
-git remote set-url origin git@github.com:YuMu-i/ChatGpt-Image-Studio.git
+git remote set-url origin https://github.com/YuMu-i/ChatGpt-Image-Studio.git
 git fetch origin
 git checkout -B main origin/main
 git checkout -B production origin/main
