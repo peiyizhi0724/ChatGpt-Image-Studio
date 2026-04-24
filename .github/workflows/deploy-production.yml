@@ -18,17 +18,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1.2.2
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          script: |
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+
+      - name: Add server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        run: |
+          ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" <<'EOF'
             export APP_DIR='${{ secrets.DEPLOY_APP_DIR }}'
             export DEPLOY_BRANCH='production'
             export HEALTHCHECK_URL='${{ secrets.HEALTHCHECK_URL }}'
             cd "$APP_DIR"
             chmod +x scripts/deploy-production.sh
             ./scripts/deploy-production.sh
+          EOF
