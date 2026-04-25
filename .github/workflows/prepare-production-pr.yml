@@ -1,0 +1,50 @@
+name: Prepare Production PR
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Prepare release branch from main
+        run: |
+          git fetch origin main production
+          git checkout -B chore/release-production origin/main
+
+      - name: Open production release pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/release-production
+          base: production
+          title: "release: promote main to production"
+          commit-message: "release: promote main to production"
+          delete-branch: true
+          body: |
+            ## Release PR
+
+            This PR promotes the latest validated changes from `main` into `production`.
+
+            ## Before merging
+
+            1. Confirm the latest custom features on `main` are ready for production.
+            2. Confirm any upstream sync changes on `main` have been reviewed and tested.
+            3. Merge this PR when you want to trigger the production deployment workflow.
