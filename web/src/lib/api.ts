@@ -4,6 +4,7 @@ export type AccountType = "Free" | "Plus" | "Pro" | "Team";
 export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
 export type SyncStatus = "synced" | "pending_upload" | "remote_only" | "remote_deleted";
 export type ImageModel = "gpt-image-1" | "gpt-image-2";
+export type ImageQuality = "low" | "medium" | "high";
 export type ImageResponseItem = {
   url?: string;
   b64_json?: string;
@@ -132,7 +133,7 @@ export type AccountQuotaResponse = {
   refresh_error?: string;
 };
 
-export type ImageMode = "studio" | "cpa" | "mix";
+export type ImageMode = "studio" | "cpa";
 
 type ImageResponse = {
   created: number;
@@ -164,11 +165,14 @@ export type ConfigPayload = {
     freeImageModel: string;
     paidImageRoute: string;
     paidImageModel: string;
+    studioAllowDisabledImageAccounts: boolean;
   };
   accounts: {
     defaultQuota: number;
     preferRemoteRefresh: boolean;
     refreshWorkers: number;
+    autoRefreshEnabled: boolean;
+    autoRefreshInterval: number;
   };
   storage: {
     authDir: string;
@@ -194,6 +198,7 @@ export type ConfigPayload = {
     baseUrl: string;
     apiKey: string;
     requestTimeout: number;
+    routeStrategy: "images_api" | "codex_responses" | "auto";
   };
   log: {
     logAllRequests: boolean;
@@ -214,11 +219,16 @@ export type RequestLogItem = {
   imageMode: ImageMode | string;
   direction: "official" | "cpa" | string;
   route: string;
+  cpaSubroute?: "images_api" | "codex_responses" | "auto" | string;
   accountType?: string;
   accountEmail?: string;
   accountFile?: string;
   requestedModel?: string;
   upstreamModel?: string;
+  imageToolModel?: string;
+  size?: string;
+  quality?: string;
+  promptLength?: number;
   preferred: boolean;
   success: boolean;
   error?: string;
@@ -337,12 +347,27 @@ export async function runSync(direction: "pull" | "push") {
 }
 
 export async function generateImage(prompt: string, model: ImageModel = "gpt-image-2", count = 1) {
+  return generateImageWithOptions(prompt, { model, count });
+}
+
+export async function generateImageWithOptions(
+  prompt: string,
+  options: {
+    model?: ImageModel;
+    count?: number;
+    size?: string;
+    quality?: ImageQuality;
+  } = {},
+) {
+  const { model = "gpt-image-2", count = 1, size, quality = "high" } = options;
   return httpRequest<ImageResponse>("/v1/images/generations", {
     method: "POST",
     body: {
       prompt,
       model,
       n: Math.max(1, count),
+      size: size?.trim() || undefined,
+      quality,
       response_format: "b64_json",
     },
   });

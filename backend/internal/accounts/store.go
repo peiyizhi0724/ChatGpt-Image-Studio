@@ -201,6 +201,78 @@ func NewStore(cfg *config.Config) (*Store, error) {
 	return store, nil
 }
 
+func (s *Store) defaultQuotaValue() int {
+	if s != nil && s.cfg != nil {
+		return max(1, s.cfg.Accounts.DefaultQuota)
+	}
+	return max(1, s.defaultQuota)
+}
+
+func (s *Store) refreshWorkersValue() int {
+	if s != nil && s.cfg != nil {
+		return max(1, s.cfg.Accounts.RefreshWorkers)
+	}
+	return max(1, s.refreshWorkers)
+}
+
+func (s *Store) autoRefreshConfig() (bool, time.Duration) {
+	if s == nil || s.cfg == nil {
+		return false, 30 * time.Minute
+	}
+	intervalMinutes := max(1, s.cfg.Accounts.AutoRefreshInterval)
+	return s.cfg.Accounts.AutoRefreshEnabled, time.Duration(intervalMinutes) * time.Minute
+}
+
+func (s *Store) RunAutoRefreshLoop(ctx context.Context) {
+	if s == nil {
+		return
+	}
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	var lastRun time.Time
+	for {
+		enabled, interval := s.autoRefreshConfig()
+		if !enabled {
+			lastRun = time.Time{}
+		} else if lastRun.IsZero() || time.Since(lastRun) >= interval {
+			requestTimeoutSeconds := 120
+			if s.cfg != nil {
+				requestTimeoutSeconds = max(30, s.cfg.ChatGPT.RequestTimeout)
+			}
+
+			runCtx, cancel := context.WithTimeout(ctx, time.Duration(requestTimeoutSeconds)*time.Second)
+			refreshed, refreshErrors, err := s.RefreshAccounts(runCtx, nil)
+			cancel()
+			lastRun = time.Now()
+
+			switch {
+			case err != nil:
+				slog.Warn("auto refresh accounts failed", "error", err)
+			case len(refreshErrors) > 0:
+				slog.Warn(
+					"auto refresh accounts completed with errors",
+					"refreshed",
+					refreshed,
+					"errors",
+					len(refreshErrors),
+					"first_error",
+					refreshErrors[0].Error,
+				)
+			default:
+				slog.Info("auto refresh accounts completed", "refreshed", refreshed)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func (s *Store) ListAccounts() ([]PublicAccount, error) {
 	localAuths, err := s.loadAuths()
 	if err != nil {
@@ -270,7 +342,7 @@ func (s *Store) AddAccounts(tokens []string) (int, int, error) {
 			state.Email = firstNonEmpty(stringValue(authData["email"]), guessEmail(authData))
 			state.UserID = firstNonEmpty(stringValue(authData["user_id"]), guessUserID(authData))
 			if !state.QuotaKnown {
-				state.Quota = s.defaultQuota
+				state.Quota = s.defaultQuotaValue()
 				state.Status = "正常"
 			}
 			return state
@@ -418,7 +490,7 @@ func (s *Store) ImportAuthFiles(files []ImportedAuthFile) (int, []string, []Impo
 			state.Email = firstNonEmpty(stringValue(targetData["email"]), guessEmail(targetData), state.Email)
 			state.UserID = firstNonEmpty(stringValue(targetData["user_id"]), guessUserID(targetData), state.UserID)
 			if !state.QuotaKnown {
-				state.Quota = s.defaultQuota
+				state.Quota = s.defaultQuotaValue()
 				if boolValue(targetData["disabled"]) {
 					state.Status = "禁用"
 				} else {
@@ -505,7 +577,7 @@ func (s *Store) RefreshAccounts(ctx context.Context, accessTokens []string) (int
 
 	jobs := make(chan string)
 	results := make(chan refreshResult, len(targets))
-	workers := minInt(max(1, s.refreshWorkers), max(1, len(targets)))
+	workers := minInt(s.refreshWorkersValue(), max(1, len(targets)))
 	for i := 0; i < workers; i++ {
 		go func() {
 			for token := range jobs {
@@ -649,14 +721,18 @@ func (s *Store) FindImageAuthByID(accountID string) (*LocalAuth, PublicAccount, 
 }
 
 func (s *Store) AcquireImageAuth(excluded map[string]struct{}) (*LocalAuth, PublicAccount, error) {
-	return s.acquireImageAuth(excluded, nil)
+	return s.acquireImageAuth(excluded, nil, false)
 }
 
 func (s *Store) AcquireImageAuthFiltered(excluded map[string]struct{}, allow func(PublicAccount) bool) (*LocalAuth, PublicAccount, error) {
-	return s.acquireImageAuth(excluded, allow)
+	return s.acquireImageAuth(excluded, allow, false)
 }
 
-func (s *Store) acquireImageAuth(excluded map[string]struct{}, allow func(PublicAccount) bool) (*LocalAuth, PublicAccount, error) {
+func (s *Store) AcquireImageAuthFilteredWithDisabledOption(excluded map[string]struct{}, allow func(PublicAccount) bool, allowDisabled bool) (*LocalAuth, PublicAccount, error) {
+	return s.acquireImageAuth(excluded, allow, allowDisabled)
+}
+
+func (s *Store) acquireImageAuth(excluded map[string]struct{}, allow func(PublicAccount) bool, allowDisabled bool) (*LocalAuth, PublicAccount, error) {
 	localAuths, err := s.loadAuths()
 	if err != nil {
 		return nil, PublicAccount{}, err
@@ -680,11 +756,11 @@ func (s *Store) acquireImageAuth(excluded map[string]struct{}, allow func(Public
 		if allow != nil && !allow(account) {
 			continue
 		}
-		ready := isUsableImageAccount(account)
+		ready := isUsableImageAccount(account, allowDisabled)
 		refreshNeeded := NeedsImageQuotaRefresh(account, now)
 		if auth.AccessToken == "" ||
-			auth.Disabled ||
-			account.Status == "禁用" ||
+			(auth.Disabled && !allowDisabled) ||
+			(account.Status == "禁用" && !allowDisabled) ||
 			account.Status == "异常" ||
 			(!ready && !refreshNeeded) {
 			continue
@@ -770,8 +846,8 @@ func NeedsImageQuotaRefresh(account PublicAccount, now time.Time) bool {
 	return !now.Before(resetAt)
 }
 
-func isUsableImageAccount(account PublicAccount) bool {
-	return account.Status != "禁用" &&
+func isUsableImageAccount(account PublicAccount, allowDisabled bool) bool {
+	return (allowDisabled || account.Status != "禁用") &&
 		account.Status != "异常" &&
 		account.Status != "限流" &&
 		account.Quota > 0
@@ -1118,7 +1194,7 @@ func (s *Store) buildPublicAccount(auth LocalAuth, syncState SyncState, remoteDi
 	accountType := firstNonEmpty(state.Type, normalizePlanType(guessPlanFromPayload(auth.Data)), "Free")
 	quota := state.Quota
 	if !state.QuotaKnown {
-		quota = s.defaultQuota
+		quota = s.defaultQuotaValue()
 	}
 	limitsProgress := cloneSlice(state.LimitsProgress)
 	status := strings.TrimSpace(state.Status)

@@ -264,17 +264,19 @@ export default function AccountsPage() {
   const [isSyncLoading, setIsSyncLoading] = useState(true);
   const [syncRunningDirection, setSyncRunningDirection] = useState<"pull" | "push" | null>(null);
 
+  const replaceAccounts = (items: Account[]) => {
+    setAccounts(normalizeAccounts(items));
+    setAccountQuotaMap({});
+    setSelectedIds((prev) => prev.filter((id) => items.some((item) => item.id === id)));
+  };
+
   const loadAccounts = async (silent = false) => {
     if (!silent) {
       setIsLoading(true);
     }
     try {
       const data = await fetchAccounts();
-      setAccounts(normalizeAccounts(data.items));
-      setAccountQuotaMap((prev) =>
-        Object.fromEntries(Object.entries(prev).filter(([id]) => data.items.some((item) => item.id === id))),
-      );
-      setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.id === id)));
+      replaceAccounts(data.items);
     } catch (error) {
       const message = error instanceof Error ? error.message : "加载账户失败";
       toast.error(message);
@@ -407,8 +409,7 @@ export default function AccountsPage() {
     setIsImporting(true);
     try {
       const data = await importAccountFiles(normalizedFiles);
-      setAccounts(normalizeAccounts(data.items));
-      setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.id === id)));
+      replaceAccounts(data.items);
       setPage(1);
       await loadSync({ silent: true, force: true });
 
@@ -437,8 +438,7 @@ export default function AccountsPage() {
     setIsDeleting(true);
     try {
       const data = await deleteAccounts(tokens);
-      setAccounts(normalizeAccounts(data.items));
-      setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.id === id)));
+      replaceAccounts(data.items);
       await loadSync({ silent: true, force: true });
       toast.success(`删除 ${data.removed ?? 0} 个账户`);
     } catch (error) {
@@ -449,8 +449,8 @@ export default function AccountsPage() {
     }
   };
 
-  const handleRefreshSelectedAccounts = async (accessTokens: string[]) => {
-    if (accessTokens.length === 0) {
+  const handleRefreshAccounts = async (accessTokens: string[], mode: "selected" | "all") => {
+    if (mode === "selected" && accessTokens.length === 0) {
       toast.error("没有需要刷新的账户");
       return;
     }
@@ -458,15 +458,14 @@ export default function AccountsPage() {
     setIsRefreshing(true);
     try {
       const data = await refreshAccounts(accessTokens);
-      setAccounts(normalizeAccounts(data.items));
-      setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.id === id)));
+      replaceAccounts(data.items);
       if (data.errors.length > 0) {
         const firstError = data.errors[0]?.error;
         toast.error(
           `刷新成功 ${data.refreshed} 个，失败 ${data.errors.length} 个${firstError ? `，首个错误：${firstError}` : ""}`,
         );
       } else {
-        toast.success(`刷新成功 ${data.refreshed} 个账户`);
+        toast.success(mode === "all" ? `已一键刷新全部账户，共 ${data.refreshed} 个` : `刷新成功 ${data.refreshed} 个账户`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "刷新账户失败";
@@ -549,9 +548,8 @@ export default function AccountsPage() {
         status: editStatus,
         quota: Number(editQuota || 0),
       });
-      setAccounts(normalizeAccounts(data.items));
-    setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.id === id)));
-    setEditingAccount(null);
+      replaceAccounts(data.items);
+      setEditingAccount(null);
       toast.success("账号信息已更新");
     } catch (error) {
       const message = error instanceof Error ? error.message : "更新账号失败";
@@ -894,7 +892,16 @@ export default function AccountsPage() {
                 <Button
                   variant="ghost"
                   className="h-8 rounded-lg px-3 text-stone-500 hover:bg-stone-100"
-                  onClick={() => void handleRefreshSelectedAccounts(selectedTokens)}
+                  onClick={() => void handleRefreshAccounts([], "all")}
+                  disabled={accounts.length === 0 || isRefreshing}
+                >
+                  {isRefreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                  一键刷新全部额度
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-8 rounded-lg px-3 text-stone-500 hover:bg-stone-100"
+                  onClick={() => void handleRefreshAccounts(selectedTokens, "selected")}
                   disabled={selectedTokens.length === 0 || isRefreshing}
                 >
                   {isRefreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}

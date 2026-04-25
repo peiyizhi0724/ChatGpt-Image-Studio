@@ -15,10 +15,10 @@ static_dir = "static"
 
 [chatgpt]
 model = "gpt-image-2"
-sse_timeout = 300
+sse_timeout = 600
 poll_interval = 3
-poll_max_wait = 180
-request_timeout = 30
+poll_max_wait = 600
+request_timeout = 120
 image_mode = "studio"
 
 # Free 账号图片请求走哪条链路：
@@ -40,10 +40,16 @@ paid_image_route = "responses"
 # 默认 gpt-5.4-mini，也可以改成 gpt-5.4。
 paid_image_model = "gpt-5.4-mini"
 
+# Studio 模式下，是否允许“已禁用但仍有图片额度”的账号继续参与图片生成。
+# 仅对 Studio 模式生效；CPA 不受影响。
+studio_allow_disabled_image_accounts = false
+
 [accounts]
 default_quota = 5
 prefer_remote_refresh = true
 refresh_workers = 6
+auto_refresh_enabled = true
+auto_refresh_interval_minutes = 30
 
 [storage]
 auth_dir = "data/auths"
@@ -71,12 +77,13 @@ mode = "fixed"
 sync_enabled = false
 
 # CPA 图片接口配置。
-# 当 image_mode = "cpa" 或 "mix" 时会使用这里的 base_url / api_key。
+# 当 image_mode = "cpa" 时会使用这里的 base_url / api_key。
 # 如果 cpa.base_url 为空，会回退复用 sync.base_url。
 [cpa]
 base_url = ""
 api_key = ""
 request_timeout = 60
+route_strategy = "images_api"
 
 [log]
 log_all_requests = false

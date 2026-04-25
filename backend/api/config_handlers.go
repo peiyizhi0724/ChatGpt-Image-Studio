@@ -22,21 +22,24 @@ type configPayload struct {
 		StaticDir string `json:"staticDir"`
 	} `json:"server"`
 	ChatGPT struct {
-		Model          string `json:"model"`
-		SSETimeout     int    `json:"sseTimeout"`
-		PollInterval   int    `json:"pollInterval"`
-		PollMaxWait    int    `json:"pollMaxWait"`
-		RequestTimeout int    `json:"requestTimeout"`
-		ImageMode      string `json:"imageMode"`
-		FreeImageRoute string `json:"freeImageRoute"`
-		FreeImageModel string `json:"freeImageModel"`
-		PaidImageRoute string `json:"paidImageRoute"`
-		PaidImageModel string `json:"paidImageModel"`
+		Model                            string `json:"model"`
+		SSETimeout                       int    `json:"sseTimeout"`
+		PollInterval                     int    `json:"pollInterval"`
+		PollMaxWait                      int    `json:"pollMaxWait"`
+		RequestTimeout                   int    `json:"requestTimeout"`
+		ImageMode                        string `json:"imageMode"`
+		FreeImageRoute                   string `json:"freeImageRoute"`
+		FreeImageModel                   string `json:"freeImageModel"`
+		PaidImageRoute                   string `json:"paidImageRoute"`
+		PaidImageModel                   string `json:"paidImageModel"`
+		StudioAllowDisabledImageAccounts bool   `json:"studioAllowDisabledImageAccounts"`
 	} `json:"chatgpt"`
 	Accounts struct {
 		DefaultQuota        int  `json:"defaultQuota"`
 		PreferRemoteRefresh bool `json:"preferRemoteRefresh"`
 		RefreshWorkers      int  `json:"refreshWorkers"`
+		AutoRefreshEnabled  bool `json:"autoRefreshEnabled"`
+		AutoRefreshInterval int  `json:"autoRefreshInterval"`
 	} `json:"accounts"`
 	Storage struct {
 		AuthDir      string `json:"authDir"`
@@ -62,6 +65,7 @@ type configPayload struct {
 		BaseURL        string `json:"baseUrl"`
 		APIKey         string `json:"apiKey"`
 		RequestTimeout int    `json:"requestTimeout"`
+		RouteStrategy  string `json:"routeStrategy"`
 	} `json:"cpa"`
 	Log struct {
 		LogAllRequests bool `json:"logAllRequests"`
@@ -104,21 +108,24 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			"static_dir": payload.Server.StaticDir,
 		},
 		"chatgpt": {
-			"model":            payload.ChatGPT.Model,
-			"sse_timeout":      payload.ChatGPT.SSETimeout,
-			"poll_interval":    payload.ChatGPT.PollInterval,
-			"poll_max_wait":    payload.ChatGPT.PollMaxWait,
-			"request_timeout":  payload.ChatGPT.RequestTimeout,
-			"image_mode":       payload.ChatGPT.ImageMode,
-			"free_image_route": payload.ChatGPT.FreeImageRoute,
-			"free_image_model": payload.ChatGPT.FreeImageModel,
-			"paid_image_route": payload.ChatGPT.PaidImageRoute,
-			"paid_image_model": payload.ChatGPT.PaidImageModel,
+			"model":                                payload.ChatGPT.Model,
+			"sse_timeout":                          payload.ChatGPT.SSETimeout,
+			"poll_interval":                        payload.ChatGPT.PollInterval,
+			"poll_max_wait":                        payload.ChatGPT.PollMaxWait,
+			"request_timeout":                      payload.ChatGPT.RequestTimeout,
+			"image_mode":                           payload.ChatGPT.ImageMode,
+			"free_image_route":                     payload.ChatGPT.FreeImageRoute,
+			"free_image_model":                     payload.ChatGPT.FreeImageModel,
+			"paid_image_route":                     payload.ChatGPT.PaidImageRoute,
+			"paid_image_model":                     payload.ChatGPT.PaidImageModel,
+			"studio_allow_disabled_image_accounts": payload.ChatGPT.StudioAllowDisabledImageAccounts,
 		},
 		"accounts": {
-			"default_quota":         payload.Accounts.DefaultQuota,
-			"prefer_remote_refresh": payload.Accounts.PreferRemoteRefresh,
-			"refresh_workers":       payload.Accounts.RefreshWorkers,
+			"default_quota":                 payload.Accounts.DefaultQuota,
+			"prefer_remote_refresh":         payload.Accounts.PreferRemoteRefresh,
+			"refresh_workers":               payload.Accounts.RefreshWorkers,
+			"auto_refresh_enabled":          payload.Accounts.AutoRefreshEnabled,
+			"auto_refresh_interval_minutes": payload.Accounts.AutoRefreshInterval,
 		},
 		"storage": {
 			"auth_dir":       payload.Storage.AuthDir,
@@ -144,6 +151,7 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			"base_url":        payload.CPA.BaseURL,
 			"api_key":         payload.CPA.APIKey,
 			"request_timeout": payload.CPA.RequestTimeout,
+			"route_strategy":  payload.CPA.RouteStrategy,
 		},
 		"log": {
 			"log_all_requests": payload.Log.LogAllRequests,
@@ -192,10 +200,13 @@ func (s *Server) buildConfigPayloadFromConfig(cfg *config.Config) configPayload 
 	payload.ChatGPT.FreeImageModel = cfg.ChatGPT.FreeImageModel
 	payload.ChatGPT.PaidImageRoute = cfg.ChatGPT.PaidImageRoute
 	payload.ChatGPT.PaidImageModel = cfg.ChatGPT.PaidImageModel
+	payload.ChatGPT.StudioAllowDisabledImageAccounts = cfg.ChatGPT.StudioAllowDisabledImageAccounts
 
 	payload.Accounts.DefaultQuota = cfg.Accounts.DefaultQuota
 	payload.Accounts.PreferRemoteRefresh = cfg.Accounts.PreferRemoteRefresh
 	payload.Accounts.RefreshWorkers = cfg.Accounts.RefreshWorkers
+	payload.Accounts.AutoRefreshEnabled = cfg.Accounts.AutoRefreshEnabled
+	payload.Accounts.AutoRefreshInterval = cfg.Accounts.AutoRefreshInterval
 
 	payload.Storage.AuthDir = cfg.Storage.AuthDir
 	payload.Storage.StateFile = cfg.Storage.StateFile
@@ -217,6 +228,7 @@ func (s *Server) buildConfigPayloadFromConfig(cfg *config.Config) configPayload 
 	payload.CPA.BaseURL = cfg.CPA.BaseURL
 	payload.CPA.APIKey = cfg.CPA.APIKey
 	payload.CPA.RequestTimeout = cfg.CPA.RequestTimeout
+	payload.CPA.RouteStrategy = cfg.CPA.RouteStrategy
 
 	payload.Log.LogAllRequests = cfg.Log.LogAllRequests
 	payload.Paths = s.cfg.Paths()

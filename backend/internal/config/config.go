@@ -46,22 +46,25 @@ type ServerConfig struct {
 }
 
 type ChatGPTConfig struct {
-	Model          string `toml:"model"`
-	SSETimeout     int    `toml:"sse_timeout"`
-	PollInterval   int    `toml:"poll_interval"`
-	PollMaxWait    int    `toml:"poll_max_wait"`
-	RequestTimeout int    `toml:"request_timeout"`
-	ImageMode      string `toml:"image_mode"`
-	FreeImageRoute string `toml:"free_image_route"`
-	FreeImageModel string `toml:"free_image_model"`
-	PaidImageRoute string `toml:"paid_image_route"`
-	PaidImageModel string `toml:"paid_image_model"`
+	Model                            string `toml:"model"`
+	SSETimeout                       int    `toml:"sse_timeout"`
+	PollInterval                     int    `toml:"poll_interval"`
+	PollMaxWait                      int    `toml:"poll_max_wait"`
+	RequestTimeout                   int    `toml:"request_timeout"`
+	ImageMode                        string `toml:"image_mode"`
+	FreeImageRoute                   string `toml:"free_image_route"`
+	FreeImageModel                   string `toml:"free_image_model"`
+	PaidImageRoute                   string `toml:"paid_image_route"`
+	PaidImageModel                   string `toml:"paid_image_model"`
+	StudioAllowDisabledImageAccounts bool   `toml:"studio_allow_disabled_image_accounts"`
 }
 
 type AccountsConfig struct {
 	DefaultQuota        int  `toml:"default_quota"`
 	PreferRemoteRefresh bool `toml:"prefer_remote_refresh"`
 	RefreshWorkers      int  `toml:"refresh_workers"`
+	AutoRefreshEnabled  bool `toml:"auto_refresh_enabled"`
+	AutoRefreshInterval int  `toml:"auto_refresh_interval_minutes"`
 }
 
 type StorageConfig struct {
@@ -95,6 +98,7 @@ type CPAConfig struct {
 	BaseURL        string `toml:"base_url"`
 	APIKey         string `toml:"api_key"`
 	RequestTimeout int    `toml:"request_timeout"`
+	RouteStrategy  string `toml:"route_strategy"`
 }
 
 type Config struct {
@@ -128,6 +132,7 @@ func (c *Config) Load() error {
 		return fmt.Errorf("decode embedded defaults: %w", err)
 	}
 	if fileExists(c.paths.Override) {
+		_, _ = migrateLegacyOverrideFile(c.paths.Override)
 		if err := decodeOverrideFile(c.paths.Override, next); err != nil {
 			return fmt.Errorf("decode override: %w", err)
 		}
@@ -248,10 +253,13 @@ func (c *Config) SaveOverrides(values map[string]map[string]any) error {
 
 	raw := map[string]any{}
 	if fileExists(c.paths.Override) {
-		if _, err := toml.DecodeFile(c.paths.Override, &raw); err != nil {
+		loaded, err := loadOverrideMap(c.paths.Override)
+		if err != nil {
 			return fmt.Errorf("read override: %w", err)
 		}
+		raw = loaded
 	}
+	sanitizeOverrideMap(raw)
 
 	for section, entries := range values {
 		sec, ok := raw[section].(map[string]any)
@@ -259,22 +267,13 @@ func (c *Config) SaveOverrides(values map[string]map[string]any) error {
 			sec = map[string]any{}
 		}
 		for key, value := range entries {
-			sec[key] = value
+			sec[key] = sanitizeOverrideEntry(section, key, value)
 		}
 		raw[section] = sec
 	}
 
-	if err := os.MkdirAll(filepath.Dir(c.paths.Override), 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-
-	f, err := os.Create(c.paths.Override)
-	if err != nil {
-		return fmt.Errorf("create override file: %w", err)
-	}
-	defer f.Close()
-	if err := toml.NewEncoder(f).Encode(raw); err != nil {
-		return fmt.Errorf("encode override: %w", err)
+	if err := writeOverrideMap(c.paths.Override, raw); err != nil {
+		return err
 	}
 
 	next := &Config{paths: c.paths}
@@ -395,6 +394,12 @@ func (c *Config) CPAImageRequestTimeout() int {
 	return 60
 }
 
+func (c *Config) CPAImageRouteStrategy() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return normalizeCPAImageRouteStrategy(c.CPA.RouteStrategy)
+}
+
 func (c *Config) proxyURLLocked(forSync bool) string {
 	if !c.Proxy.Enabled {
 		return ""
@@ -410,7 +415,7 @@ func (c *Config) proxyURLLocked(forSync bool) string {
 
 func (c *Config) validate() error {
 	if normalized, ok := normalizeImageMode(c.ChatGPT.ImageMode); !ok {
-		return fmt.Errorf("invalid chatgpt.image_mode %q: only studio, cpa or mix are supported", strings.TrimSpace(c.ChatGPT.ImageMode))
+		return fmt.Errorf("invalid chatgpt.image_mode %q: only studio or cpa are supported", strings.TrimSpace(c.ChatGPT.ImageMode))
 	} else {
 		c.ChatGPT.ImageMode = normalized
 	}
@@ -428,6 +433,8 @@ func (c *Config) validate() error {
 			return fmt.Errorf("invalid %s %q", item.name, strings.TrimSpace(item.value))
 		}
 	}
+
+	c.CPA.RouteStrategy = normalizeCPAImageRouteStrategy(c.CPA.RouteStrategy)
 
 	if !c.Proxy.Enabled {
 		return nil
@@ -469,14 +476,27 @@ func normalizeImageRoute(route string) (string, bool) {
 
 func normalizeImageMode(mode string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", "studio":
+	case "", "studio", "mix":
 		return "studio", true
 	case "cpa":
 		return "cpa", true
-	case "mix":
-		return "mix", true
 	default:
 		return "", false
+	}
+}
+
+func normalizeCPAImageRouteStrategy(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return "images_api"
+	case "images_api":
+		return "images_api"
+	case "codex_responses":
+		return "codex_responses"
+	case "auto":
+		return "auto"
+	default:
+		return "images_api"
 	}
 }
 
@@ -485,11 +505,88 @@ func NormalizeImageModeForAPI(mode string) (string, bool) {
 }
 
 func decodeOverrideFile(path string, target *Config) error {
-	raw := map[string]any{}
-	if _, err := toml.DecodeFile(path, &raw); err != nil {
+	raw, err := loadOverrideMap(path)
+	if err != nil {
 		return err
 	}
+	sanitizeOverrideMap(raw)
 	return applyOverrideMap(reflect.ValueOf(target).Elem(), raw)
+}
+
+func loadOverrideMap(path string) (map[string]any, error) {
+	raw := map[string]any{}
+	if _, err := toml.DecodeFile(path, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func migrateLegacyOverrideFile(path string) (bool, error) {
+	if !fileExists(path) {
+		return false, nil
+	}
+
+	raw, err := loadOverrideMap(path)
+	if err != nil {
+		return false, err
+	}
+	if !sanitizeOverrideMap(raw) {
+		return false, nil
+	}
+	if err := writeOverrideMap(path, raw); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func sanitizeOverrideMap(raw map[string]any) bool {
+	if raw == nil {
+		return false
+	}
+
+	changed := false
+	chatgptSection, ok := raw["chatgpt"].(map[string]any)
+	if !ok {
+		return false
+	}
+	if value, ok := chatgptSection["image_mode"]; ok {
+		sanitized := sanitizeOverrideEntry("chatgpt", "image_mode", value)
+		if !reflect.DeepEqual(sanitized, value) {
+			chatgptSection["image_mode"] = sanitized
+			changed = true
+		}
+	}
+	return changed
+}
+
+func sanitizeOverrideEntry(section, key string, value any) any {
+	if section != "chatgpt" || key != "image_mode" {
+		return value
+	}
+	text, ok := value.(string)
+	if !ok {
+		return value
+	}
+	if normalized, ok := normalizeImageMode(text); ok {
+		return normalized
+	}
+	return value
+}
+
+func writeOverrideMap(path string, raw map[string]any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create override file: %w", err)
+	}
+	defer f.Close()
+	if err := toml.NewEncoder(f).Encode(raw); err != nil {
+		return fmt.Errorf("encode override: %w", err)
+	}
+	return nil
 }
 
 func decodeDefaultTemplate(target *Config) error {
@@ -662,7 +759,8 @@ func hasConfigMarker(root string) bool {
 	dataDir := filepath.Join(root, dataDirName)
 	return fileExists(filepath.Join(dataDir, userConfigFile)) ||
 		fileExists(filepath.Join(dataDir, exampleConfigFile)) ||
-		fileExists(filepath.Join(dataDir, "config.defaults.toml"))
+		fileExists(filepath.Join(dataDir, "config.defaults.toml")) ||
+		fileExists(filepath.Join(root, "internal", "config", "config.defaults.toml"))
 }
 
 func fileExists(path string) bool {

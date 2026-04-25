@@ -57,6 +57,73 @@ func TestNeedsImageQuotaRefreshByResetTime(t *testing.T) {
 	}
 }
 
+func TestRecordImageResultDecrementsLocalQuotaAndImageLimit(t *testing.T) {
+	rootDir := t.TempDir()
+	authDir := filepath.Join(rootDir, "auths")
+	syncDir := filepath.Join(rootDir, "sync")
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatalf("mkdir auth dir: %v", err)
+	}
+	if err := os.MkdirAll(syncDir, 0o755); err != nil {
+		t.Fatalf("mkdir sync dir: %v", err)
+	}
+
+	const token = "token-record-image-result"
+	store := &Store{
+		authDir:      authDir,
+		syncStateDir: syncDir,
+		stateFile:    filepath.Join(rootDir, "state.json"),
+		defaultQuota: 5,
+		providerType: "codex",
+		states: map[string]RuntimeState{
+			"record.json": {
+				Type:       "Plus",
+				Status:     "正常",
+				Quota:      1,
+				QuotaKnown: true,
+				LimitsProgress: []map[string]any{
+					{
+						"feature_name": "image_gen",
+						"remaining":    1,
+					},
+				},
+			},
+		},
+	}
+
+	if err := writeJSONFile(filepath.Join(authDir, "record.json"), map[string]any{
+		"type":         "codex",
+		"access_token": token,
+		"email":        "record@example.com",
+	}); err != nil {
+		t.Fatalf("seed auth file: %v", err)
+	}
+
+	store.RecordImageResult(token, true)
+
+	state := store.getState("record.json")
+	if state.Success != 1 {
+		t.Fatalf("expected success count 1, got %d", state.Success)
+	}
+	if state.Quota != 0 {
+		t.Fatalf("expected quota 0, got %d", state.Quota)
+	}
+	if state.Status != "限流" {
+		t.Fatalf("expected status 限流, got %q", state.Status)
+	}
+
+	imageRemaining := -1
+	for _, item := range state.LimitsProgress {
+		if strings.TrimSpace(strings.ToLower(stringValue(item["feature_name"]))) != "image_gen" {
+			continue
+		}
+		imageRemaining = intValue(item["remaining"])
+	}
+	if imageRemaining != 0 {
+		t.Fatalf("expected image_gen remaining 0, got %d", imageRemaining)
+	}
+}
+
 func TestImportAuthFilesSkipsDuplicateToken(t *testing.T) {
 	rootDir := t.TempDir()
 	authDir := filepath.Join(rootDir, "auths")
@@ -320,6 +387,55 @@ func TestAcquireImageAuthFilteredAcceptsPaidAccountInferredFromAccessToken(t *te
 	}
 	if account.Type != "Plus" {
 		t.Fatalf("AcquireImageAuthFiltered() type = %q, want %q", account.Type, "Plus")
+	}
+}
+
+func TestAcquireImageAuthFilteredWithDisabledOptionAllowsDisabledAccount(t *testing.T) {
+	rootDir := t.TempDir()
+	authDir := filepath.Join(rootDir, "auths")
+	syncDir := filepath.Join(rootDir, "sync")
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatalf("mkdir auth dir: %v", err)
+	}
+	if err := os.MkdirAll(syncDir, 0o755); err != nil {
+		t.Fatalf("mkdir sync dir: %v", err)
+	}
+
+	store := &Store{
+		authDir:      authDir,
+		syncStateDir: syncDir,
+		stateFile:    filepath.Join(rootDir, "state.json"),
+		defaultQuota: 5,
+		providerType: "codex",
+		states: map[string]RuntimeState{
+			"disabled.json": {
+				Type:       "Plus",
+				Status:     "禁用",
+				Quota:      3,
+				QuotaKnown: true,
+			},
+		},
+	}
+
+	if err := writeJSONFile(filepath.Join(authDir, "disabled.json"), map[string]any{
+		"type":         "codex",
+		"access_token": "token-disabled",
+		"email":        "disabled@example.com",
+		"disabled":     true,
+	}); err != nil {
+		t.Fatalf("seed disabled auth file: %v", err)
+	}
+
+	if _, _, err := store.AcquireImageAuthFiltered(nil, nil); !errors.Is(err, ErrNoAvailableImageAuth) {
+		t.Fatalf("AcquireImageAuthFiltered() error = %v, want ErrNoAvailableImageAuth", err)
+	}
+
+	_, account, err := store.AcquireImageAuthFilteredWithDisabledOption(nil, nil, true)
+	if err != nil {
+		t.Fatalf("AcquireImageAuthFilteredWithDisabledOption() returned error: %v", err)
+	}
+	if account.Email != "disabled@example.com" {
+		t.Fatalf("AcquireImageAuthFilteredWithDisabledOption() email = %q, want %q", account.Email, "disabled@example.com")
 	}
 }
 
