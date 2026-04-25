@@ -63,6 +63,8 @@ type AccountsConfig struct {
 	DefaultQuota        int  `toml:"default_quota"`
 	PreferRemoteRefresh bool `toml:"prefer_remote_refresh"`
 	RefreshWorkers      int  `toml:"refresh_workers"`
+	AutoRefreshEnabled  bool `toml:"auto_refresh_enabled"`
+	AutoRefreshInterval int  `toml:"auto_refresh_interval_minutes"`
 }
 
 type StorageConfig struct {

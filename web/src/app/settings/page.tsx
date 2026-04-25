@@ -66,6 +66,8 @@ function defaultConfigPayload(): ConfigPayload {
       defaultQuota: 5,
       preferRemoteRefresh: true,
       refreshWorkers: 6,
+      autoRefreshEnabled: true,
+      autoRefreshInterval: 30,
     },
     storage: {
       authDir: "",

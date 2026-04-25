@@ -428,6 +428,66 @@ export function RuntimeSection({ config, setSection }: RuntimeSectionProps) {
         />
       </Field>
       <ToggleField
+        label="自动定时刷新额度"
+        hint="后端会按设定周期自动刷新全部账号的图片额度与状态。"
+        tooltip={
+          <TooltipDetails
+            items={[
+              {
+                title: "开启后",
+                body: <>服务会在后台按周期刷新全部账号，不需要手动一页页勾选。</>,
+              },
+              {
+                title: "适合场景",
+                body: <>账号很多、经常跨页管理时，建议开启，图片工作台和账号页的额度会更稳定。</>,
+              },
+              {
+                title: "注意",
+                body: <>这是后台定时任务，不需要页面保持打开；刷新频率越高，对上游请求也越频繁。</>,
+              },
+            ]}
+          />
+        }
+        checked={config.accounts.autoRefreshEnabled}
+        onCheckedChange={(checked) =>
+          setSection("accounts", {
+            ...config.accounts,
+            autoRefreshEnabled: checked,
+          })
+        }
+      />
+      <Field
+        label="自动刷新间隔（分钟）"
+        hint="后台定时刷新额度的执行周期。"
+        tooltip={
+          <TooltipDetails
+            items={[
+              {
+                title: "建议值",
+                body: <>常用 `15`、`30`、`60` 分钟；账号越多，越建议保守一些。</>,
+              },
+              {
+                title: "设置过小",
+                body: <>会更频繁请求上游，虽然额度更实时，但也更容易增加波动和额外开销。</>,
+              },
+            ]}
+          />
+        }
+      >
+        <Input
+          type="number"
+          min="1"
+          value={String(config.accounts.autoRefreshInterval)}
+          onChange={(event) =>
+            setSection("accounts", {
+              ...config.accounts,
+              autoRefreshInterval: Number(event.target.value || 0),
+            })
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+      <ToggleField
         label="优先远端刷新额度"
         hint="开启后，后端会优先尝试刷新真实额度状态，而不是只依赖本地扣减。"
         tooltip={

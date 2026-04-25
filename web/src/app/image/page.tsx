@@ -5,7 +5,7 @@ import "react-medium-image-zoom/dist/styles.css";
 import { ChevronsDown } from "lucide-react";
 
 import { ImageEditModal } from "@/components/image-edit-modal";
-import { fetchAccounts, fetchConfig, type Account, type ImageQuality } from "@/lib/api";
+import { fetchAccountQuota, fetchAccounts, fetchConfig, type Account, type ImageQuality } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   normalizeConversation,
@@ -13,6 +13,7 @@ import {
   updateImageConversation,
   type ImageConversation,
   type ImageMode,
+  type StoredImage,
 } from "@/store/image-conversations";
 import { isImageTaskActive, listActiveImageTasks, subscribeImageTasks } from "@/store/image-active-tasks";
 import { ConversationTurns } from "./components/conversation-turns";
@@ -178,6 +179,42 @@ function getImageRemaining(account: Account) {
     return Math.max(0, limit.remaining);
   }
   return Math.max(0, account.quota);
+}
+
+function mergeImageGenLimit(
+  limitsProgress: Account["limits_progress"],
+  remaining: number | null | undefined,
+  resetAfter: string | null | undefined,
+) {
+  const next = Array.isArray(limitsProgress) ? [...limitsProgress] : [];
+  const currentIndex = next.findIndex((item) => item.feature_name === "image_gen");
+  const nextItem = {
+    feature_name: "image_gen",
+    remaining: typeof remaining === "number" ? remaining : undefined,
+    reset_after: resetAfter || undefined,
+  };
+
+  if (currentIndex >= 0) {
+    next[currentIndex] = {
+      ...next[currentIndex],
+      ...nextItem,
+    };
+    return next;
+  }
+
+  next.push(nextItem);
+  return next;
+}
+
+function applyQuotaResultToAccount(account: Account, quota: Awaited<ReturnType<typeof fetchAccountQuota>>): Account {
+  return {
+    ...account,
+    status: quota.status,
+    type: quota.type,
+    quota: quota.quota,
+    restoreAt: quota.image_gen_reset_after || account.restoreAt,
+    limits_progress: mergeImageGenLimit(account.limits_progress, quota.image_gen_remaining, quota.image_gen_reset_after),
+  };
 }
 
 function isImageAccountUsable(account: Account, allowDisabled: boolean) {
@@ -347,9 +384,9 @@ export default function ImagePage() {
   const [upscaleScale, setUpscaleScale] = useState("2x");
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [availableQuota, setAvailableQuota] = useState("加载中");
   const [availableAccounts, setAvailableAccounts] = useState<Account[]>([]);
   const [allowDisabledStudioAccounts, setAllowDisabledStudioAccounts] = useState(false);
+  const [isQuotaLoading, setIsQuotaLoading] = useState(true);
   const [activeRequest, setActiveRequest] = useState<ActiveRequestState | null>(null);
   const [submitStartedAt, setSubmitStartedAt] = useState<number | null>(null);
   const [submitElapsedSeconds, setSubmitElapsedSeconds] = useState(0);
@@ -442,6 +479,10 @@ export default function ImagePage() {
     () => hasAvailablePaidImageAccount(availableAccounts, allowDisabledStudioAccounts),
     [allowDisabledStudioAccounts, availableAccounts],
   );
+  const availableQuota = useMemo(
+    () => (isQuotaLoading ? "加载中" : formatAvailableQuota(availableAccounts, allowDisabledStudioAccounts)),
+    [allowDisabledStudioAccounts, availableAccounts, isQuotaLoading],
+  );
   const currentResolutionPresets = useMemo(() => imageResolutionPresets[imageAspectRatio], [imageAspectRatio]);
   const imageResolutionTierOptions = useMemo(
     () =>
@@ -495,6 +536,25 @@ export default function ImagePage() {
     [activeRequest, submitElapsedSeconds],
   );
   const waitingDots = useMemo(() => buildWaitingDots(submitElapsedSeconds), [submitElapsedSeconds]);
+  const syncQuotaAfterResult = useCallback((images: StoredImage[]) => {
+    const sourceAccountID =
+      images.find((item) => item.status === "success" && item.source_account_id)?.source_account_id ??
+      images.find((item) => item.source_account_id)?.source_account_id;
+    if (!sourceAccountID) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        const quota = await fetchAccountQuota(sourceAccountID, { refresh: false });
+        setAvailableAccounts((prev) =>
+          prev.map((account) => (account.id === sourceAccountID ? applyQuotaResultToAccount(account, quota) : account)),
+        );
+      } catch {
+        // Keep the current quota snapshot when a best-effort sync fails.
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -534,17 +594,18 @@ export default function ImagePage() {
 
   useEffect(() => {
     const loadQuota = async () => {
+      setIsQuotaLoading(true);
       try {
         const [accountsData, configData] = await Promise.all([fetchAccounts(), fetchConfig()]);
         const allowDisabled =
           configData.chatgpt.imageMode === "studio" && configData.chatgpt.studioAllowDisabledImageAccounts;
         setAllowDisabledStudioAccounts(allowDisabled);
         setAvailableAccounts(accountsData.items);
-        setAvailableQuota(formatAvailableQuota(accountsData.items, allowDisabled));
       } catch {
         setAvailableAccounts([]);
         setAllowDisabledStudioAccounts(false);
-        setAvailableQuota((prev) => (prev === "加载中" ? "—" : prev));
+      } finally {
+        setIsQuotaLoading(false);
       }
     };
 
@@ -732,6 +793,7 @@ export default function ImagePage() {
     setSubmitElapsedSeconds,
     setSubmitStartedAt,
     persistConversation,
+    syncQuotaAfterResult,
     updateConversation,
     resetComposer,
   });

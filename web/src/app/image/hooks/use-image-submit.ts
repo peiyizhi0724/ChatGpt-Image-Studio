@@ -67,6 +67,7 @@ type UseImageSubmitOptions = {
   setSubmitElapsedSeconds: (value: number) => void;
   setSubmitStartedAt: (value: number | null) => void;
   persistConversation: (conversation: ImageConversation) => Promise<void>;
+  syncQuotaAfterResult: (images: StoredImage[]) => void;
   updateConversation: (
     conversationId: string,
     updater: (current: ImageConversation | null) => ImageConversation,
@@ -118,6 +119,7 @@ export function useImageSubmit({
   setSubmitElapsedSeconds,
   setSubmitStartedAt,
   persistConversation,
+  syncQuotaAfterResult,
   updateConversation,
   resetComposer,
 }: UseImageSubmitOptions) {
@@ -227,6 +229,7 @@ export function useImageSubmit({
         });
       }
       const resultItems = mergeResultImages(turnId, data.data || [], 1);
+      syncQuotaAfterResult(resultItems);
       const failedCount = countFailures(resultItems);
 
       await updateConversation(conversationId, (current) => ({
@@ -288,6 +291,7 @@ export function useImageSubmit({
     setSubmitStartedAt,
     updateConversation,
     upscaleScale,
+    syncQuotaAfterResult,
   ]);
 
   const handleRetryTurn = useCallback(async (conversationId: string, turn: ImageConversationTurn) => {
@@ -393,6 +397,7 @@ export function useImageSubmit({
         resultItems = mergeResultImages(turnId, data.data || [], 1);
       }
 
+      syncQuotaAfterResult(resultItems);
       const failedCount = countFailures(resultItems);
       await updateConversation(conversationId, (current) => ({
         ...(current ?? buildConversationBase(conversationId, draftTurn)),
@@ -439,7 +444,17 @@ export function useImageSubmit({
       setActiveRequest(null);
       setSubmitStartedAt(null);
     }
-  }, [focusConversation, isSubmitting, setActiveRequest, setIsSubmitting, setSubmitElapsedSeconds, setSubmitStartedAt, updateConversation, upscaleScale]);
+  }, [
+    focusConversation,
+    isSubmitting,
+    setActiveRequest,
+    setIsSubmitting,
+    setSubmitElapsedSeconds,
+    setSubmitStartedAt,
+    syncQuotaAfterResult,
+    updateConversation,
+    upscaleScale,
+  ]);
 
   const handleSubmit = useCallback(async () => {
     const prompt = imagePrompt.trim();
@@ -547,6 +562,7 @@ export function useImageSubmit({
         resultItems = mergeResultImages(turnId, data.data || [], 1);
       }
 
+      syncQuotaAfterResult(resultItems);
       const failedCount = countFailures(resultItems);
       await updateConversation(conversationId, (current) => ({
         ...(current ?? buildConversationBase(conversationId, draftTurn)),
@@ -623,6 +639,7 @@ export function useImageSubmit({
     setSubmitElapsedSeconds,
     setSubmitStartedAt,
     sourceImages,
+    syncQuotaAfterResult,
     updateConversation,
     upscaleScale,
   ]);
