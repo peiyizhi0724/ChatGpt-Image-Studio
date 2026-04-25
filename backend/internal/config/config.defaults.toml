@@ -48,6 +48,8 @@ studio_allow_disabled_image_accounts = false
 default_quota = 5
 prefer_remote_refresh = true
 refresh_workers = 6
+auto_refresh_enabled = true
+auto_refresh_interval_minutes = 30
 
 [storage]
 auth_dir = "data/auths"

@@ -171,6 +171,8 @@ export type ConfigPayload = {
     defaultQuota: number;
     preferRemoteRefresh: boolean;
     refreshWorkers: number;
+    autoRefreshEnabled: boolean;
+    autoRefreshInterval: number;
   };
   storage: {
     authDir: string;

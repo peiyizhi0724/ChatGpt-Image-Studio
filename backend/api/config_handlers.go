@@ -38,6 +38,8 @@ type configPayload struct {
 		DefaultQuota        int  `json:"defaultQuota"`
 		PreferRemoteRefresh bool `json:"preferRemoteRefresh"`
 		RefreshWorkers      int  `json:"refreshWorkers"`
+		AutoRefreshEnabled  bool `json:"autoRefreshEnabled"`
+		AutoRefreshInterval int  `json:"autoRefreshInterval"`
 	} `json:"accounts"`
 	Storage struct {
 		AuthDir      string `json:"authDir"`
@@ -119,9 +121,11 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			"studio_allow_disabled_image_accounts": payload.ChatGPT.StudioAllowDisabledImageAccounts,
 		},
 		"accounts": {
-			"default_quota":         payload.Accounts.DefaultQuota,
-			"prefer_remote_refresh": payload.Accounts.PreferRemoteRefresh,
-			"refresh_workers":       payload.Accounts.RefreshWorkers,
+			"default_quota":                 payload.Accounts.DefaultQuota,
+			"prefer_remote_refresh":         payload.Accounts.PreferRemoteRefresh,
+			"refresh_workers":               payload.Accounts.RefreshWorkers,
+			"auto_refresh_enabled":          payload.Accounts.AutoRefreshEnabled,
+			"auto_refresh_interval_minutes": payload.Accounts.AutoRefreshInterval,
 		},
 		"storage": {
 			"auth_dir":       payload.Storage.AuthDir,
@@ -201,6 +205,8 @@ func (s *Server) buildConfigPayloadFromConfig(cfg *config.Config) configPayload 
 	payload.Accounts.DefaultQuota = cfg.Accounts.DefaultQuota
 	payload.Accounts.PreferRemoteRefresh = cfg.Accounts.PreferRemoteRefresh
 	payload.Accounts.RefreshWorkers = cfg.Accounts.RefreshWorkers
+	payload.Accounts.AutoRefreshEnabled = cfg.Accounts.AutoRefreshEnabled
+	payload.Accounts.AutoRefreshInterval = cfg.Accounts.AutoRefreshInterval
 
 	payload.Storage.AuthDir = cfg.Storage.AuthDir
 	payload.Storage.StateFile = cfg.Storage.StateFile

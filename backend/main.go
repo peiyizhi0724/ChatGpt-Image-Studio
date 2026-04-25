@@ -61,6 +61,9 @@ func main() {
 
 	syncTimeout := time.Duration(max(10, cfg.Sync.RequestTimeout)) * time.Second
 	syncClient := cliproxy.New(cfg.Sync.Enabled, cfg.Sync.BaseURL, cfg.Sync.ManagementKey, cfg.Sync.ProviderType, syncTimeout, cfg.SyncProxyURL())
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	defer backgroundCancel()
+	go store.RunAutoRefreshLoop(backgroundCtx)
 
 	host := envString("SERVER_HOST", cfg.Server.Host)
 	port := envInt("SERVER_PORT", cfg.Server.Port)
@@ -108,6 +111,7 @@ func main() {
 		logger.Info("shutdown signal received")
 	}
 
+	backgroundCancel()
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutCtx)
