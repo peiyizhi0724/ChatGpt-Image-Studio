@@ -26,7 +26,7 @@ export default function LoginPage() {
     try {
       await login(normalizedAuthKey);
       await setStoredAuthKey(normalizedAuthKey);
-      navigate("/image", { replace: true });
+      navigate("/", { replace: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : "登录失败";
       toast.error(message);

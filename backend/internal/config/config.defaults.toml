@@ -12,6 +12,9 @@ max_upload_size_mb = 50
 host = "0.0.0.0"
 port = 7000
 static_dir = "static"
+max_image_concurrency = 8
+image_queue_limit = 32
+image_queue_timeout_seconds = 20
 
 [chatgpt]
 model = "gpt-image-2"
@@ -48,6 +51,7 @@ studio_allow_disabled_image_accounts = false
 default_quota = 5
 prefer_remote_refresh = true
 refresh_workers = 6
+image_quota_refresh_ttl_seconds = 120
 
 [storage]
 auth_dir = "data/auths"

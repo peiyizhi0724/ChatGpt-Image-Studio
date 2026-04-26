@@ -1,194 +1,120 @@
 # ChatGpt Image Studio
 
-ChatGpt Image Studio 是一个单服务交付的图片工作流项目：
+ChatGpt Image Studio is a local image workflow project built on top of the upstream open-source repository.
 
-- `backend/`：Go 后端，负责图片接口、账号池、配置管理和静态资源托管
-- `web/`：Vite + React 前端，构建后输出到 `web/dist`
-- `scripts/`：本地开发、检查、构建脚本
+This customized version keeps the original Studio / CPA image generation capability, and adds:
 
-项目当前交付方式是“一个二进制 + 一份静态前端 + 本地配置目录”：
+- stable multi-account image concurrency control
+- single-account single-task leasing
+- local browser-side free-account grouping policy
+- reserve threshold based account rollover
+- runtime / startup diagnostics
+- one-click Windows start / stop scripts
+- desktop shortcut and auto-start helper scripts
 
-- 前端不需要单独部署
-- 后端运行时直接托管 `static/`
-- 首次启动时自动生成 `data/config.toml`
-- 首次生成配置后即可本地运行
+## What This Version Adds
 
-## 核心功能
+### 1. Stable image concurrency
 
-- 基于 `gpt-image-2` 的文本生图
-- 参考图生成与连续编辑
-- 选区涂抹式局部重绘
-- 图片放大与增强
-- 兼容图片场景的 `/v1/chat/completions` 与 `/v1/responses`
-- 本地认证文件导入与账号池管理
-- 额度查询与刷新
-- 与 CLIProxyAPI 兼容的 CPA 双向同步
-- 请求方向记录页，可区分官方与 CPA 链路
-- 配置管理页，可直接修改 `data/config.toml`
+The backend now supports:
 
-## 界面预览
+- global image concurrency limit
+- short queue with timeout
+- token-level account lease
+- per-request runtime logging
 
-| 预览 1 | 预览 2 |
-| --- | --- |
-| ![界面预览 1](asset/21994c2f6f7ccdc2f5c6f5c472c1e7a7af4f1063.png) | ![界面预览 2](asset/665a23c2fc38a6c49d127f454b651854fcfa8e84.png) |
-| ![界面预览 3](asset/9c47ac91270469513b769c30748f6d48f421ba9f.png) | ![界面预览 4](asset/a4f2e51c873e3066fb71fcab84fee8dee8ff9ea9.png) |
-| ![界面预览 5](asset/bb2f570badfb194f8b16b07221df40bfac94ee05.png) | ![界面预览 6](asset/bf84c0b8a48d8cc28afec8a1980834887f8dd211.png) |
+Default runtime values:
 
-## 仓库结构
+- max concurrency: `8`
+- queue limit: `32`
+- queue timeout: `20s`
+- quota refresh TTL: `120s`
+
+### 2. Free account grouping policy
+
+The accounts page now supports a browser-local routing policy for free accounts.
+
+Default behavior:
+
+- sort mode: `imported_at`
+- group size: `10`
+- enabled groups: first `2`
+- reserve threshold: `20%`
+
+The policy is sent in the request header:
+
+- `X-Studio-Account-Policy`
+
+If the header is missing, backend behavior stays compatible with the old selection logic.
+
+### 3. One-click Windows launch
+
+You can now run the project without typing terminal commands every time.
+
+Root-level launch files:
+
+- `start-studio.cmd`
+- `stop-studio.cmd`
+- `studio-status.cmd`
+- `open-studio-logs.cmd`
+
+Helper scripts:
+
+- `create-desktop-shortcuts.cmd`
+- `create-startup-shortcut.cmd`
+- `remove-startup-shortcut.cmd`
+
+## Repository Layout
 
 ```text
 .
-├── backend/                  Go 后端
-│   ├── api/                  HTTP 路由与处理器
-│   ├── internal/             配置、账号、同步、中间件、版本信息
-│   ├── data/                 默认模板与本地运行数据目录
-│   ├── static/               本地开发时同步的前端静态资源（构建产物，不入库）
-│   └── main.go
-├── web/                      Vite 前端
-│   ├── src/                  React 页面与组件
-│   └── dist/                 构建产物（不入库）
-├── scripts/                  build / dev / check 脚本
-└── README.md
+|- backend/                   Go backend
+|  |- api/                    HTTP handlers and image workflow API
+|  |- internal/               config, accounts, sync, runtime helpers
+|  |- data/                   local runtime config and account data
+|  `- go.mod
+|- web/                       Vite + React frontend
+|  |- src/
+|  `- scripts/
+|- scripts/                   local dev / build / startup helper scripts
+|- start-studio.cmd
+|- stop-studio.cmd
+|- studio-status.cmd
+`- README.md
 ```
 
-## 环境要求
+## Requirements
 
+- Windows 10/11 recommended for the one-click launcher flow
 - Go `1.25+`
 - Node.js `24+`
 - npm `10+`
 
-## 获取项目
+## Quick Start
+
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/peiyizhi0724/ChatGpt-Image-Studio.git
 cd ChatGpt-Image-Studio
 ```
 
-## 本地开发
+### 2. Prepare config
 
-### 启动开发环境
+Runtime config location:
 
-Windows：
-
-```powershell
-./scripts/dev.ps1
-```
-
-macOS / Linux：
-
-```bash
-chmod +x ./scripts/*.sh
-./scripts/dev.sh
-```
-
-开发脚本会自动完成：
-
-1. 安装前端依赖
-2. 构建 `web/dist`
-3. 同步前端资源到 `backend/static`
-4. 启动 Go 后端
-
-默认地址：
-
-- `http://127.0.0.1:7000`
-
-健康检查：
-
-- `GET /health`
-
-## Docker 部署
-
-当前仓库支持通过 GitHub Container Registry 直接拉取镜像部署。
-
-镜像发布规则：
-
-- 推送到 `main` 分支后，GitHub Actions 会自动更新 `ghcr.io/peiyizhi0724/chatgpt-image-studio:latest`
-- 推送版本标签 `v1.2.x` 后，会额外发布同名版本镜像标签
-- Docker 镜像同时提供 `linux/amd64` 与 `linux/arm64`
-
-### 首次启动
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-默认会：
-
-- 使用 `ghcr.io/peiyizhi0724/chatgpt-image-studio:latest`，也就是 `main` 分支当前最新镜像
-- 将宿主机的 `./backend/data` 挂载到容器内 `/app/data`
-- 对外暴露 `7000` 端口
-
-如需固定到某个版本，可先设置：
-
-```bash
-export IMAGE_TAG=v1.2.7
-docker compose pull
-docker compose up -d
-```
-
-Windows PowerShell：
-
-```powershell
-$env:IMAGE_TAG = "v1.2.7"
-docker compose pull
-docker compose up -d
-```
-
-### 一键更新
-
-Windows：
-
-```powershell
-./scripts/docker-update.ps1
-```
-
-macOS / Linux：
-
-```bash
-chmod +x ./scripts/docker-update.sh
-./scripts/docker-update.sh
-```
-
-更新脚本会自动执行：
-
-1. 检查 Docker / Docker Compose
-2. 如果当前目录是 Git 仓库，则先 `git pull --ff-only origin main`
-3. 从 GitHub Container Registry 拉取 `latest` 镜像
-4. 重新创建并启动容器
-
-### 配置文件
-
-程序启动时会确保以下文件存在：
-
-- `data/config.example.toml`
-- `data/config.toml`
-
-在仓库开发模式下，上述路径实际对应：
-
-- `backend/data/config.example.toml`
 - `backend/data/config.toml`
 
-如果 `config.toml` 不存在，程序会自动按内置模板生成，无需手动复制。
+If the file does not exist, the backend can create it from the default template on first run.
 
-最小配置示例：
+Minimum example:
 
 ```toml
 [app]
 auth_key = "chatgpt2api"
 ```
 
-如果需要接入 CPA 同步：
-
-```toml
-[sync]
-enabled = true
-base_url = "http://127.0.0.1:8317"
-management_key = "your-cliproxy-management-key"
-provider_type = "codex"
-```
-
-如果需要通过固定代理访问 ChatGPT，可追加：
+If you use Studio mode with a fixed proxy:
 
 ```toml
 [proxy]
@@ -198,189 +124,182 @@ mode = "fixed"
 sync_enabled = false
 ```
 
-如果需要调整 `Free` / `Plus / Pro / Team` 账号的图片链路，可在 `[chatgpt]` 下补充：
+If you use CPA image mode:
 
 ```toml
 [chatgpt]
-free_image_route = "legacy"
-free_image_model = "auto"
-paid_image_route = "responses"
-paid_image_model = "gpt-5.4-mini"
+image_mode = "cpa"
+
+[cpa]
+base_url = "http://127.0.0.1:8317"
+api_key = "your-cpa-key"
+request_timeout = 120
+route_strategy = "auto"
 ```
 
-说明：
+### 3. Start the project
 
-- `free_image_route`
-  控制 `Free` 账号图片请求走哪条链路。
-- `free_image_model`
-  控制 `Free` 账号真正发给上游的模型名。
-- `paid_image_route`
-  控制 `Plus / Pro / Team` 账号图片请求走哪条链路。
-- `paid_image_model`
-  控制 `Plus / Pro / Team` 账号真正发给上游的模型名。
+Recommended on Windows:
 
-## 构建
+- double-click `start-studio.cmd`
 
-Windows：
+This will:
+
+1. build frontend static assets
+2. sync frontend assets into `backend/static`
+3. start backend on the configured port
+4. open the browser automatically
+
+Default URL:
+
+- `http://127.0.0.1:7000`
+
+### 4. Stop the project
+
+- double-click `stop-studio.cmd`
+
+### 5. Check logs
+
+- double-click `open-studio-logs.cmd`
+
+Log files:
+
+- `.runtime/studio.out.log`
+- `.runtime/studio.err.log`
+
+## Desktop Shortcuts and Auto Start
+
+### Desktop shortcuts
+
+To create Windows desktop shortcuts:
+
+- double-click `create-desktop-shortcuts.cmd`
+
+Generated shortcuts:
+
+- `生图工作台-启动`
+- `生图工作台-停止`
+- `生图工作台-状态`
+- `生图工作台-日志`
+
+### Auto start at sign-in
+
+To create a Windows startup shortcut:
+
+- double-click `create-startup-shortcut.cmd`
+
+To remove it:
+
+- double-click `remove-startup-shortcut.cmd`
+
+## Local Development
+
+### Windows
+
+```powershell
+./scripts/dev.ps1
+```
+
+### macOS / Linux
+
+```bash
+chmod +x ./scripts/*.sh
+./scripts/dev.sh
+```
+
+## Build
+
+### Windows
 
 ```powershell
 ./scripts/build.ps1
 ```
 
-macOS / Linux：
+### macOS / Linux
 
 ```bash
 ./scripts/build.sh
 ```
 
-构建脚本会执行：
+Build output:
 
-1. 构建前端 `web/dist`
-2. 同步前端资源到 `backend/static`
-3. 构建后端二进制
-4. 生成本地发布目录 `dist/package`
+- `dist/package/`
 
-构建输出目录结构：
+## Test
 
-```text
-dist/package/
-├── chatgpt-image-studio.exe / chatgpt-image-studio
-├── data/
-│   └── config.example.toml
-├── static/
-│   ├── index.html
-│   └── assets/...
-└── README.txt
-```
-
-## 检查
-
-Windows：
+### Windows
 
 ```powershell
 ./scripts/check.ps1
 ```
 
-macOS / Linux：
+### macOS / Linux
 
 ```bash
 ./scripts/check.sh
 ```
 
-当前检查项：
+## Important Runtime Pages
 
-- `go test ./...`
-- `npx tsc --noEmit`
-- `npm run lint`
-- `npm run build`
+- accounts page: account import, quota view, grouping policy
+- requests page: route logs, group routing, queue/runtime fields
+- settings page: config editing
+- startup check page: startup diagnostics
 
-如需额外验证 `Studio / CPA` 以及旧版 `mix -> studio` 兼容迁移的图片路由，可打开可选黑盒测试：
+## Free Account Grouping Notes
 
-macOS / Linux：
+The grouping policy is intentionally browser-local:
 
-```bash
-RUN_IMAGE_MODE_COMPAT_TESTS=1 ./scripts/check.sh
-```
+- it is stored in local storage
+- it is not written into `/api/config`
+- different browsers can use different group selections
 
-Windows PowerShell：
+Current policy fields:
 
-```powershell
-$env:RUN_IMAGE_MODE_COMPAT_TESTS = "1"
-./scripts/check.ps1
-```
+- `enabled`
+- `sortMode`
+- `groupSize`
+- `enabledGroupIndexes`
+- `reserveMode`
+- `reservePercent`
 
-这组测试默认不会在普通检查里执行，只在显式设置环境变量后追加运行：
+Supported sort modes:
 
-- `go test ./api -run TestImageModeCompatibilityBlackBox -count=1`
+- `imported_at`
+- `name`
+- `quota`
 
-## 启动失败兜底
+## Runtime Logging
 
-如果启动失败，程序会：
+Request logs now expose:
 
-- 在命令行输出中文错误信息
-- 将详细信息写入 `data/last-startup-error.txt`
+- `queueWaitMs`
+- `inflightCountAtStart`
+- `leaseAcquired`
+- `errorCode`
+- `routingPolicyApplied`
+- `routingGroupIndex`
+- `routingSortMode`
+- `routingReservePercent`
 
-当前重点处理的失败场景：
+## Local Data and Sensitive Files
 
-- 端口占用
-- 配置文件损坏
-- 静态资源缺失
-- 首次生成配置文件失败
-
-## 主要接口
-
-### 应用基础
-
-- `POST /auth/login`
-- `GET /version`
-- `GET /health`
-
-### 账号管理
-
-- `GET /api/accounts`
-- `POST /api/accounts`
-- `POST /api/accounts/import`
-- `DELETE /api/accounts`
-- `POST /api/accounts/refresh`
-- `POST /api/accounts/update`
-- `GET /api/accounts/{id}/quota`
-
-### 配置与请求记录
-
-- `GET /api/config`
-- `PUT /api/config`
-- `GET /api/requests`
-
-### 同步
-
-- `GET /api/sync/status`
-- `POST /api/sync/run`
-
-### 图片接口
-
-- `POST /v1/images/generations`
-- `POST /v1/images/edits`
-- `POST /v1/images/upscale`
-- `POST /v1/chat/completions`
-- `POST /v1/responses`
-- `GET /v1/models`
-- `GET /v1/files/image/{filename}`
-
-## 本地数据与敏感信息
-
-以下内容默认不会提交到 Git：
+Do not commit:
 
 - `backend/data/config.toml`
-- `backend/data/config.example.toml`
-- `backend/data/accounts_state.json`
 - `backend/data/auths/*.json`
+- `backend/data/accounts_state.json`
 - `backend/data/sync_state/*.json`
-- `backend/data/tmp/`
-- `backend/data/last-startup-error.txt`
-- `backend/static/`
-- `web/dist/`
-- 发布产物、日志、临时文件、本地二进制
+- runtime logs
+- temporary image files
+- local caches and toolchains
 
-不要提交认证文件、管理密钥、运行状态或日志中的敏感内容。
+## Syncing With Upstream
 
-## 社区支持
+See:
 
-- Linux.do 社区：<https://linux.do/>
+- `docs/UPSTREAM-SYNC.md`
 
-## 许可证
+## License
 
-本仓库使用 MIT 许可证，详见 [LICENSE](LICENSE)。
-
-> [!WARNING]
-> 免责声明：
->
-> 本项目涉及对 ChatGPT 官网相关图片能力的研究与封装，仅供个人学习、技术研究与非商业性技术交流使用。
->
-> - 严禁将本项目用于任何商业用途、盈利性使用、批量操作、自动化滥用或规模化调用。
-> - 严禁将本项目用于生成、传播或协助生成违法、暴力、色情、未成年人相关内容，或用于诈骗、欺诈、骚扰等非法或不当用途。
-> - 严禁将本项目用于任何违反 OpenAI 服务条款、当地法律法规或平台规则的行为。
-> - 使用者应自行承担全部风险，包括但不限于账号被限制、临时封禁、永久封禁以及因违规使用等导致的法律责任。
-> - 使用本项目即视为你已充分理解并同意本免责声明全部内容；如因滥用、违规或违法使用造成任何后果，均由使用者自行承担。
-
-> [!IMPORTANT]
-> 本项目基于对 ChatGPT 官网相关能力的研究实现，存在账号受限、临时封禁或永久封禁的风险。请勿使用自己的重要账号、常用账号或高价值账号进行测试。
+This repository is still based on the upstream project and follows the upstream licensing model unless you intentionally change it.

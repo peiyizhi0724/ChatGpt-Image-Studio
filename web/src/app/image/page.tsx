@@ -5,7 +5,14 @@ import "react-medium-image-zoom/dist/styles.css";
 import { ChevronsDown } from "lucide-react";
 
 import { ImageEditModal } from "@/components/image-edit-modal";
-import { fetchAccounts, fetchConfig, type Account, type ImageQuality } from "@/lib/api";
+import {
+  fetchAccounts,
+  fetchConfig,
+  fetchRuntimeStatus,
+  type Account,
+  type ImageQuality,
+  type RuntimeStatusResponse,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   normalizeConversation,
@@ -354,6 +361,7 @@ export default function ImagePage() {
   const [submitStartedAt, setSubmitStartedAt] = useState<number | null>(null);
   const [submitElapsedSeconds, setSubmitElapsedSeconds] = useState(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
 
   const syncRuntimeTaskState = useCallback((preferredConversationId?: string | null) => {
     const tasks = listActiveImageTasks();
@@ -408,7 +416,6 @@ export default function ImagePage() {
     closeSelectionEditor,
   } = useImageSourceInputs({
     mode,
-    isSubmitting,
     setMode,
     setImagePrompt,
     focusConversation,
@@ -486,7 +493,9 @@ export default function ImagePage() {
   const imageSources = useMemo(() => sourceImages.filter((item) => item.role === "image"), [sourceImages]);
   const maskSource = useMemo(() => sourceImages.find((item) => item.role === "mask") ?? null, [sourceImages]);
   const hasGenerateReferences = useMemo(() => mode === "generate" && imageSources.length > 0, [imageSources, mode]);
-  const activeConversationIds = new Set(listActiveImageTasks().map((task) => task.conversationId));
+  const activeTasksSnapshot = listActiveImageTasks();
+  const activeConversationIds = new Set(activeTasksSnapshot.map((task) => task.conversationId));
+  const activeTurnKeys = new Set(activeTasksSnapshot.map((task) => `${task.conversationId}:${task.turnId}`));
   const processingStatus = useMemo(
     () =>
       activeRequest
@@ -553,6 +562,33 @@ export default function ImagePage() {
     }
     didLoadQuotaRef.current = true;
     void loadQuota();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRuntimeStatus = async () => {
+      try {
+        const data = await fetchRuntimeStatus();
+        if (!cancelled) {
+          setRuntimeStatus(data);
+        }
+      } catch {
+        if (!cancelled) {
+          setRuntimeStatus(null);
+        }
+      }
+    };
+
+    void loadRuntimeStatus();
+    const timer = window.setInterval(() => {
+      void loadRuntimeStatus();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -721,16 +757,11 @@ export default function ImagePage() {
     upscaleScale,
     selectedConversationId,
     editorTarget,
-    isSubmitting,
     makeId,
     focusConversation,
     closeSelectionEditor,
     setImagePrompt,
     setSourceImages,
-    setIsSubmitting,
-    setActiveRequest,
-    setSubmitElapsedSeconds,
-    setSubmitStartedAt,
     persistConversation,
     updateConversation,
     resetComposer,
@@ -766,6 +797,8 @@ export default function ImagePage() {
         <WorkspaceHeader
           historyCollapsed={historyCollapsed}
           selectedConversationTitle={selectedConversation?.title}
+          activeTaskCount={activeTasksSnapshot.length}
+          runtimeStatus={runtimeStatus}
           onToggleHistory={() => setHistoryCollapsed((current) => !current)}
         />
 
@@ -778,7 +811,7 @@ export default function ImagePage() {
                 conversationId={selectedConversation.id}
                 turns={selectedConversationTurns}
                 modeLabelMap={modeLabelMap}
-                activeRequest={activeRequest}
+                activeTurnKeys={activeTurnKeys}
                 isSubmitting={isSubmitting}
                 processingStatus={processingStatus}
                 waitingDots={waitingDots}
@@ -822,7 +855,6 @@ export default function ImagePage() {
           availableQuota={availableQuota}
           sourceImages={sourceImages}
           imagePrompt={imagePrompt}
-          isSubmitting={isSubmitting}
           textareaRef={textareaRef}
           uploadInputRef={uploadInputRef}
           maskInputRef={maskInputRef}
@@ -845,11 +877,9 @@ export default function ImagePage() {
         open={Boolean(editorTarget)}
         imageName={editorTarget?.imageName || "image.png"}
         imageSrc={editorTarget?.sourceDataUrl || ""}
-        isSubmitting={isSubmitting}
+        isSubmitting={false}
         onClose={() => {
-          if (!isSubmitting) {
-            closeSelectionEditor();
-          }
+          closeSelectionEditor();
         }}
         onSubmit={handleSelectionEditSubmit}
       />

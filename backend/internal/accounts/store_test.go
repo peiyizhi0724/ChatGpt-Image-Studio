@@ -372,6 +372,168 @@ func TestAcquireImageAuthFilteredWithDisabledOptionAllowsDisabledAccount(t *test
 	}
 }
 
+func TestAcquireImageAuthLeasePreventsConcurrentReuse(t *testing.T) {
+	rootDir := t.TempDir()
+	authDir := filepath.Join(rootDir, "auths")
+	syncDir := filepath.Join(rootDir, "sync")
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatalf("mkdir auth dir: %v", err)
+	}
+	if err := os.MkdirAll(syncDir, 0o755); err != nil {
+		t.Fatalf("mkdir sync dir: %v", err)
+	}
+
+	store := &Store{
+		authDir:      authDir,
+		syncStateDir: syncDir,
+		stateFile:    filepath.Join(rootDir, "state.json"),
+		defaultQuota: 5,
+		providerType: "codex",
+		states: map[string]RuntimeState{
+			"lease.json": {
+				Type:       "Plus",
+				Status:     "姝ｅ父",
+				Quota:      3,
+				QuotaKnown: true,
+			},
+		},
+	}
+
+	if err := writeJSONFile(filepath.Join(authDir, "lease.json"), map[string]any{
+		"type":         "codex",
+		"access_token": "token-lease",
+		"email":        "lease@example.com",
+	}); err != nil {
+		t.Fatalf("seed lease auth file: %v", err)
+	}
+
+	_, firstAccount, release, err := store.AcquireImageAuthLeaseFilteredWithDisabledOption(nil, nil, false)
+	if err != nil {
+		t.Fatalf("first AcquireImageAuthLeaseFilteredWithDisabledOption() error: %v", err)
+	}
+	if firstAccount.Email != "lease@example.com" {
+		t.Fatalf("first account email = %q, want lease@example.com", firstAccount.Email)
+	}
+
+	_, _, _, err = store.AcquireImageAuthLeaseFilteredWithDisabledOption(nil, nil, false)
+	if !errors.Is(err, ErrNoAvailableImageAuth) {
+		t.Fatalf("second AcquireImageAuthLeaseFilteredWithDisabledOption() error = %v, want ErrNoAvailableImageAuth", err)
+	}
+
+	release()
+
+	_, secondAccount, releaseAgain, err := store.AcquireImageAuthLeaseFilteredWithDisabledOption(nil, nil, false)
+	if err != nil {
+		t.Fatalf("third AcquireImageAuthLeaseFilteredWithDisabledOption() error: %v", err)
+	}
+	if secondAccount.Email != "lease@example.com" {
+		t.Fatalf("second account email = %q, want lease@example.com", secondAccount.Email)
+	}
+	releaseAgain()
+}
+
+func TestFindImageAuthByIDWithLeaseReturnsInUse(t *testing.T) {
+	rootDir := t.TempDir()
+	authDir := filepath.Join(rootDir, "auths")
+	syncDir := filepath.Join(rootDir, "sync")
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatalf("mkdir auth dir: %v", err)
+	}
+	if err := os.MkdirAll(syncDir, 0o755); err != nil {
+		t.Fatalf("mkdir sync dir: %v", err)
+	}
+
+	store := &Store{
+		authDir:      authDir,
+		syncStateDir: syncDir,
+		stateFile:    filepath.Join(rootDir, "state.json"),
+		defaultQuota: 5,
+		providerType: "codex",
+		states: map[string]RuntimeState{
+			"source.json": {
+				Type:       "Plus",
+				Status:     "姝ｅ父",
+				Quota:      5,
+				QuotaKnown: true,
+			},
+		},
+	}
+
+	if err := writeJSONFile(filepath.Join(authDir, "source.json"), map[string]any{
+		"type":         "codex",
+		"access_token": "token-source",
+		"email":        "source@example.com",
+	}); err != nil {
+		t.Fatalf("seed source auth file: %v", err)
+	}
+
+	accounts, err := store.ListAccounts()
+	if err != nil {
+		t.Fatalf("ListAccounts() error: %v", err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("ListAccounts() count = %d, want 1", len(accounts))
+	}
+	accountID := accounts[0].ID
+
+	_, _, release, err := store.FindImageAuthByIDWithLease(accountID)
+	if err != nil {
+		t.Fatalf("FindImageAuthByIDWithLease() first error: %v", err)
+	}
+
+	_, _, _, err = store.FindImageAuthByIDWithLease(accountID)
+	if !errors.Is(err, ErrImageAuthInUse) {
+		t.Fatalf("FindImageAuthByIDWithLease() second error = %v, want ErrImageAuthInUse", err)
+	}
+
+	release()
+}
+
+func TestNeedsImageQuotaRefreshWithTTL(t *testing.T) {
+	now := time.Date(2026, 4, 26, 8, 0, 0, 0, time.UTC)
+	ttl := 120 * time.Second
+
+	fresh := PublicAccount{
+		Quota:           3,
+		LastRefreshedAt: now.Add(-30 * time.Second).Format(time.RFC3339),
+		LimitsProgress: []map[string]any{
+			{
+				"feature_name": "image_gen",
+				"remaining":    3,
+				"reset_after":  now.Add(30 * time.Minute).Format(time.RFC3339),
+			},
+		},
+	}
+	if NeedsImageQuotaRefreshWithTTL(fresh, now, ttl) {
+		t.Fatal("expected refresh to be skipped within ttl window")
+	}
+
+	stale := fresh
+	stale.LastRefreshedAt = now.Add(-5 * time.Minute).Format(time.RFC3339)
+	if !NeedsImageQuotaRefreshWithTTL(stale, now, ttl) {
+		t.Fatal("expected refresh when ttl expires")
+	}
+
+	resetExpired := fresh
+	resetExpired.LastRefreshedAt = now.Add(-30 * time.Second).Format(time.RFC3339)
+	resetExpired.LimitsProgress = []map[string]any{
+		{
+			"feature_name": "image_gen",
+			"remaining":    0,
+			"reset_after":  now.Add(-1 * time.Minute).Format(time.RFC3339),
+		},
+	}
+	if !NeedsImageQuotaRefreshWithTTL(resetExpired, now, ttl) {
+		t.Fatal("expected refresh when reset_after has passed")
+	}
+
+	noRefreshRecord := fresh
+	noRefreshRecord.LastRefreshedAt = ""
+	if !NeedsImageQuotaRefreshWithTTL(noRefreshRecord, now, ttl) {
+		t.Fatal("expected refresh when no last_refreshed_at is recorded")
+	}
+}
+
 func mustTestJWT(t *testing.T, payload map[string]any) string {
 	t.Helper()
 

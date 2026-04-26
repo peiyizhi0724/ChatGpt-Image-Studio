@@ -1,0 +1,1 @@
+export const STARTUP_CHECK_COMPLETED_KEY = "chatgpt_image_studio_startup_check_completed";

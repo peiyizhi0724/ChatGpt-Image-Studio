@@ -1,4 +1,7 @@
 import { httpRequest } from "@/lib/request";
+import { getStoredAuthKey } from "@/store/auth";
+import { buildImageAccountPolicyHeader } from "@/store/image-account-policy";
+import webConfig from "@/constants/common-env";
 
 export type AccountType = "Free" | "Plus" | "Pro" | "Team";
 export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
@@ -51,6 +54,7 @@ export type Account = {
   syncOrigin?: string | null;
   lastSyncedAt?: string | null;
   remoteDisabled?: boolean | null;
+  importedAt?: string | null;
 };
 
 export type SyncAccount = {
@@ -153,6 +157,9 @@ export type ConfigPayload = {
     host: string;
     port: number;
     staticDir: string;
+    maxImageConcurrency: number;
+    imageQueueLimit: number;
+    imageQueueTimeoutSeconds: number;
   };
   chatgpt: {
     model: string;
@@ -171,6 +178,7 @@ export type ConfigPayload = {
     defaultQuota: number;
     preferRemoteRefresh: boolean;
     refreshWorkers: number;
+    imageQuotaRefreshTTLSeconds: number;
   };
   storage: {
     authDir: string;
@@ -218,6 +226,14 @@ export type RequestLogItem = {
   direction: "official" | "cpa" | string;
   route: string;
   cpaSubroute?: "images_api" | "codex_responses" | "auto" | string;
+  queueWaitMs?: number;
+  inflightCountAtStart?: number;
+  leaseAcquired?: boolean;
+  errorCode?: string;
+  routingPolicyApplied?: boolean;
+  routingGroupIndex?: number;
+  routingSortMode?: string;
+  routingReservePercent?: number;
   accountType?: string;
   accountEmail?: string;
   accountFile?: string;
@@ -236,6 +252,52 @@ export type VersionInfo = {
   version: string;
   commit?: string;
   buildTime?: string;
+};
+
+export type StartupCheckItem = {
+  key: string;
+  label: string;
+  status: "pass" | "warn" | "fail" | string;
+  detail: string;
+  hint?: string;
+  durationMs: number;
+};
+
+export type StartupCheckResponse = {
+  startedAt: string;
+  finishedAt: string;
+  mode: "studio" | "cpa" | string;
+  overall: "pass" | "warn" | "fail" | string;
+  passCount: number;
+  warnCount: number;
+  failCount: number;
+  checks: StartupCheckItem[];
+  summaryText: string;
+};
+
+export type RuntimeStatusResponse = {
+  timestamp: string;
+  mode: "studio" | "cpa" | string;
+  admission: {
+    maxConcurrency: number;
+    queueLimit: number;
+    queueTimeoutMs: number;
+    inflight: number;
+    queued: number;
+  };
+  accounts: {
+    total: number;
+    available: number;
+    availablePaid: number;
+  };
+  recent: {
+    windowSeconds: number;
+    failureCount: number;
+    lastError?: string;
+    lastErrorCode?: string;
+    lastErrorAt?: string;
+    lastErrorAccount?: string;
+  };
 };
 
 export async function login(authKey: string) {
@@ -337,6 +399,37 @@ export async function fetchVersionInfo() {
   });
 }
 
+export async function fetchStartupCheck() {
+  return httpRequest<StartupCheckResponse>("/api/startup/check");
+}
+
+export async function fetchRuntimeStatus() {
+  return httpRequest<RuntimeStatusResponse>("/api/runtime/status");
+}
+
+export async function downloadDiagnosticsExport() {
+  const authKey = await getStoredAuthKey();
+  const response = await fetch(`${webConfig.apiUrl.replace(/\/$/, "")}/api/diagnostics/export`, {
+    method: "GET",
+    headers: authKey ? { Authorization: `Bearer ${authKey}` } : {},
+  });
+  if (!response.ok) {
+    let message = `download failed (${response.status})`;
+    try {
+      const payload = (await response.json()) as { error?: string; message?: string; detail?: { message?: string } };
+      message = payload?.detail?.message || payload?.message || payload?.error || message;
+    } catch {
+      // ignore json parse errors
+    }
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/i);
+  const fileName = match?.[1] || `chatgpt-image-studio-diagnostics-${Date.now()}.json`;
+  return { blob, fileName };
+}
+
 export async function runSync(direction: "pull" | "push") {
   return httpRequest<{ result: SyncRunResult; status?: SyncStatusResponse }>("/api/sync/run", {
     method: "POST",
@@ -358,8 +451,10 @@ export async function generateImageWithOptions(
   } = {},
 ) {
   const { model = "gpt-image-2", count = 1, size, quality = "high" } = options;
+  const policyHeader = buildImageAccountPolicyHeader();
   return httpRequest<ImageResponse>("/v1/images/generations", {
     method: "POST",
+    headers: policyHeader ? { "X-Studio-Account-Policy": policyHeader } : undefined,
     body: {
       prompt,
       model,
@@ -385,6 +480,7 @@ export async function editImage({
   model?: ImageModel;
 }) {
   const formData = new FormData();
+  const policyHeader = buildImageAccountPolicyHeader();
   formData.append("prompt", prompt);
   formData.append("model", model);
   formData.append("response_format", "b64_json");
@@ -405,6 +501,7 @@ export async function editImage({
   }
   return httpRequest<ImageResponse>("/v1/images/edits", {
     method: "POST",
+    headers: policyHeader ? { "X-Studio-Account-Policy": policyHeader } : undefined,
     body: formData,
   });
 }
@@ -421,6 +518,7 @@ export async function upscaleImage({
   model?: ImageModel;
 }) {
   const formData = new FormData();
+  const policyHeader = buildImageAccountPolicyHeader();
   formData.append("image", image);
   formData.append("model", model);
   formData.append("response_format", "b64_json");
@@ -430,6 +528,7 @@ export async function upscaleImage({
   }
   return httpRequest<ImageResponse>("/v1/images/upscale", {
     method: "POST",
+    headers: policyHeader ? { "X-Studio-Account-Policy": policyHeader } : undefined,
     body: formData,
   });
 }

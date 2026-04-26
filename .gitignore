@@ -9,6 +9,11 @@ Thumbs.db
 .runtime/
 .codex-logs/
 .git.broken*/
+.cache/
+.gocache/
+.gomodcache/
+.tools/
+/data/
 
 # Root artifacts
 *.log
@@ -40,10 +45,12 @@ Thumbs.db
 !/backend/data/sync_state/.gitkeep
 !/backend/data/tmp/
 !/backend/data/tmp/image/
+/backend/data/tmp/image/*
 !/backend/data/tmp/image/.gitkeep
 
 # Local backend config copy (not used by runtime)
 /backend/config.toml
+/scripts/run-local-studio.cmd
 
 # Frontend dependencies/build
 /web/node_modules/

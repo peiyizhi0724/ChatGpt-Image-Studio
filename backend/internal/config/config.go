@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"chatgpt2api/internal/outboundproxy"
 
@@ -40,9 +41,12 @@ type AppConfig struct {
 }
 
 type ServerConfig struct {
-	Host      string `toml:"host"`
-	Port      int    `toml:"port"`
-	StaticDir string `toml:"static_dir"`
+	Host                     string `toml:"host"`
+	Port                     int    `toml:"port"`
+	StaticDir                string `toml:"static_dir"`
+	MaxImageConcurrency      int    `toml:"max_image_concurrency"`
+	ImageQueueLimit          int    `toml:"image_queue_limit"`
+	ImageQueueTimeoutSeconds int    `toml:"image_queue_timeout_seconds"`
 }
 
 type ChatGPTConfig struct {
@@ -60,9 +64,10 @@ type ChatGPTConfig struct {
 }
 
 type AccountsConfig struct {
-	DefaultQuota        int  `toml:"default_quota"`
-	PreferRemoteRefresh bool `toml:"prefer_remote_refresh"`
-	RefreshWorkers      int  `toml:"refresh_workers"`
+	DefaultQuota                int  `toml:"default_quota"`
+	PreferRemoteRefresh         bool `toml:"prefer_remote_refresh"`
+	RefreshWorkers              int  `toml:"refresh_workers"`
+	ImageQuotaRefreshTTLSeconds int  `toml:"image_quota_refresh_ttl_seconds"`
 }
 
 type StorageConfig struct {
@@ -398,6 +403,34 @@ func (c *Config) CPAImageRouteStrategy() string {
 	return normalizeCPAImageRouteStrategy(c.CPA.RouteStrategy)
 }
 
+func (c *Config) ImageQueueConfig() (int, int, time.Duration) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	maxImageConcurrency := c.Server.MaxImageConcurrency
+	if maxImageConcurrency <= 0 {
+		maxImageConcurrency = 8
+	}
+	imageQueueLimit := c.Server.ImageQueueLimit
+	if imageQueueLimit <= 0 {
+		imageQueueLimit = 32
+	}
+	timeoutSeconds := c.Server.ImageQueueTimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 20
+	}
+	return maxImageConcurrency, imageQueueLimit, time.Duration(timeoutSeconds) * time.Second
+}
+
+func (c *Config) ImageQuotaRefreshTTL() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ttlSeconds := c.Accounts.ImageQuotaRefreshTTLSeconds
+	if ttlSeconds <= 0 {
+		ttlSeconds = 120
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
 func (c *Config) proxyURLLocked(forSync bool) string {
 	if !c.Proxy.Enabled {
 		return ""
@@ -412,6 +445,19 @@ func (c *Config) proxyURLLocked(forSync bool) string {
 }
 
 func (c *Config) validate() error {
+	if c.Server.MaxImageConcurrency <= 0 {
+		c.Server.MaxImageConcurrency = 8
+	}
+	if c.Server.ImageQueueLimit <= 0 {
+		c.Server.ImageQueueLimit = 32
+	}
+	if c.Server.ImageQueueTimeoutSeconds <= 0 {
+		c.Server.ImageQueueTimeoutSeconds = 20
+	}
+	if c.Accounts.ImageQuotaRefreshTTLSeconds <= 0 {
+		c.Accounts.ImageQuotaRefreshTTLSeconds = 120
+	}
+
 	if normalized, ok := normalizeImageMode(c.ChatGPT.ImageMode); !ok {
 		return fmt.Errorf("invalid chatgpt.image_mode %q: only studio or cpa are supported", strings.TrimSpace(c.ChatGPT.ImageMode))
 	} else {

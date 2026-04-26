@@ -18,7 +18,6 @@ export type EditorTarget = {
 
 type UseImageSourceInputsOptions = {
   mode: ImageMode;
-  isSubmitting: boolean;
   setMode: (mode: ImageMode) => void;
   setImagePrompt: (value: string) => void;
   focusConversation: (conversationId: string) => void;
@@ -37,7 +36,6 @@ async function fileToDataUrl(file: File) {
 
 export function useImageSourceInputs({
   mode,
-  isSubmitting,
   setMode,
   setImagePrompt,
   focusConversation,
@@ -78,9 +76,6 @@ export function useImageSourceInputs({
   }, [makeId, mode]);
 
   const handlePromptPaste = useCallback((event: ReactClipboardEvent<HTMLTextAreaElement>) => {
-    if (isSubmitting) {
-      return;
-    }
     const clipboardImages = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
@@ -99,7 +94,7 @@ export function useImageSourceInputs({
           ? "已从剪贴板添加源图"
           : "已从剪贴板添加放大源图",
     );
-  }, [appendFiles, isSubmitting, mode]);
+  }, [appendFiles, mode]);
 
   const removeSourceImage = useCallback((id: string) => {
     setSourceImages((prev) => prev.filter((item) => item.id !== id));

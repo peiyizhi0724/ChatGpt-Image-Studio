@@ -7,6 +7,7 @@ import LoginPage from "@/app/login/page";
 import HomePage from "@/app/page";
 import RequestsPage from "@/app/requests/page";
 import SettingsPage from "@/app/settings/page";
+import StartupCheckPage from "@/app/startup-check/page";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/requests" element={<RequestsPage />} />
+        <Route path="/startup-check" element={<StartupCheckPage />} />
       </Routes>
     </AppShell>
   );

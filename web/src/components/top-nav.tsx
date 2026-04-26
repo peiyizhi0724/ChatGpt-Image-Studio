@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Activity, ImageIcon, LogOut, PanelLeftClose, PanelLeftOpen, Settings2, Shield, Sparkles } from "lucide-react";
+import { Activity, ImageIcon, LogOut, PanelLeftClose, PanelLeftOpen, Settings2, Shield, ShieldCheck, Sparkles } from "lucide-react";
 
 import { fetchVersionInfo } from "@/lib/api";
 import { clearStoredAuthKey } from "@/store/auth";
@@ -18,6 +18,7 @@ function formatVersionLabel(value: string) {
 }
 
 const navItems = [
+  { href: "/startup-check", label: "启动体检", description: "连通性与配置自检", icon: ShieldCheck },
   { href: "/image", label: "图片工作台", description: "生成、编辑与放大", icon: ImageIcon },
   { href: "/accounts", label: "账号管理", description: "号池、额度与同步", icon: Shield },
   { href: "/settings", label: "配置管理", description: "模式、接口与后端配置", icon: Settings2 },

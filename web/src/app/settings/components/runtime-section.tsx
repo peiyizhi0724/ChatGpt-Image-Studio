@@ -427,6 +427,70 @@ export function RuntimeSection({ config, setSection }: RuntimeSectionProps) {
           className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
         />
       </Field>
+      <Field
+        label="生图全局并发上限"
+        hint="generations / edits / upscale 共享的并发执行上限。"
+      >
+        <Input
+          type="number"
+          value={String(config.server.maxImageConcurrency)}
+          onChange={(event) =>
+            setSection("server", {
+              ...config.server,
+              maxImageConcurrency: Number(event.target.value || 0),
+            })
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+      <Field
+        label="排队长度上限"
+        hint="请求超过该排队长度会立即返回 server_busy。"
+      >
+        <Input
+          type="number"
+          value={String(config.server.imageQueueLimit)}
+          onChange={(event) =>
+            setSection("server", {
+              ...config.server,
+              imageQueueLimit: Number(event.target.value || 0),
+            })
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+      <Field
+        label="排队超时（秒）"
+        hint="请求在队列中等待超时后返回 server_busy。"
+      >
+        <Input
+          type="number"
+          value={String(config.server.imageQueueTimeoutSeconds)}
+          onChange={(event) =>
+            setSection("server", {
+              ...config.server,
+              imageQueueTimeoutSeconds: Number(event.target.value || 0),
+            })
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+      <Field
+        label="额度刷新 TTL（秒）"
+        hint="距离上次刷新小于该值时，不重复刷新账号额度。"
+      >
+        <Input
+          type="number"
+          value={String(config.accounts.imageQuotaRefreshTTLSeconds)}
+          onChange={(event) =>
+            setSection("accounts", {
+              ...config.accounts,
+              imageQuotaRefreshTTLSeconds: Number(event.target.value || 0),
+            })
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
       <ToggleField
         label="优先远端刷新额度"
         hint="开启后，后端会优先尝试刷新真实额度状态，而不是只依赖本地扣减。"

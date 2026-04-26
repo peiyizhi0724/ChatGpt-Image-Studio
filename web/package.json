@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vite build",
+    "build": "node scripts/build-static.mjs",
     "build:watch": "vite build --watch",
     "preview": "vite preview --host 0.0.0.0",
     "lint": "eslint .",

@@ -197,11 +197,12 @@ func newCompatFreeOnlyStudioServer(t *testing.T) *Server {
 	if err := writeCompatTestJSON(statePath, map[string]any{
 		"accounts": map[string]any{
 			"free.json": map[string]any{
-				"type":        "Free",
-				"status":      "正常",
-				"quota":       5,
-				"quota_known": true,
-				"priority":    0,
+				"type":              "Free",
+				"status":            "正常",
+				"quota":             5,
+				"quota_known":       true,
+				"last_refreshed_at": time.Now().UTC().Format(time.RFC3339),
+				"priority":          0,
 				"limits_progress": []map[string]any{
 					{
 						"feature_name": "image_gen",

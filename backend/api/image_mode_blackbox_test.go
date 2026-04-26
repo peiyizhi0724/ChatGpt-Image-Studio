@@ -732,11 +732,12 @@ func seedImageModeCompatAccounts(cfg *config.Config, accountType string, account
 			quota = 5
 		}
 		stateAccounts[fileName] = map[string]any{
-			"type":        firstNonEmpty(account.accountType, accountType, "Free"),
-			"status":      firstNonEmpty(account.status, "正常"),
-			"quota":       quota,
-			"quota_known": true,
-			"priority":    account.priority,
+			"type":              firstNonEmpty(account.accountType, accountType, "Free"),
+			"status":            firstNonEmpty(account.status, "正常"),
+			"quota":             quota,
+			"quota_known":       true,
+			"last_refreshed_at": time.Now().UTC().Format(time.RFC3339),
+			"priority":          account.priority,
 			"limits_progress": []map[string]any{
 				{
 					"feature_name": "image_gen",

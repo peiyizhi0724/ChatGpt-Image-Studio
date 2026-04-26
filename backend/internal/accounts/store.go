@@ -33,23 +33,26 @@ type LocalAuth struct {
 	Disabled    bool
 	Note        string
 	Priority    int
+	ImportedAt  time.Time
 	Data        map[string]any
 }
 
 type RuntimeState struct {
-	Type             string           `json:"type,omitempty"`
-	Status           string           `json:"status,omitempty"`
-	Quota            int              `json:"quota"`
-	QuotaKnown       bool             `json:"quota_known"`
-	Email            string           `json:"email,omitempty"`
-	UserID           string           `json:"user_id,omitempty"`
-	LimitsProgress   []map[string]any `json:"limits_progress,omitempty"`
-	DefaultModelSlug string           `json:"default_model_slug,omitempty"`
-	RestoreAt        string           `json:"restore_at,omitempty"`
-	Success          int              `json:"success"`
-	Fail             int              `json:"fail"`
-	LastUsedAt       string           `json:"last_used_at,omitempty"`
-	LastRefreshedAt  string           `json:"last_refreshed_at,omitempty"`
+	Type                       string           `json:"type,omitempty"`
+	Status                     string           `json:"status,omitempty"`
+	Quota                      int              `json:"quota"`
+	QuotaKnown                 bool             `json:"quota_known"`
+	Email                      string           `json:"email,omitempty"`
+	UserID                     string           `json:"user_id,omitempty"`
+	LimitsProgress             []map[string]any `json:"limits_progress,omitempty"`
+	DefaultModelSlug           string           `json:"default_model_slug,omitempty"`
+	RestoreAt                  string           `json:"restore_at,omitempty"`
+	Success                    int              `json:"success"`
+	Fail                       int              `json:"fail"`
+	LastUsedAt                 string           `json:"last_used_at,omitempty"`
+	LastRefreshedAt            string           `json:"last_refreshed_at,omitempty"`
+	ImageQuotaDailyBase        int              `json:"image_quota_daily_base,omitempty"`
+	ImageQuotaDailyBaseResetAt string           `json:"image_quota_daily_base_reset_at,omitempty"`
 }
 
 type SyncState struct {
@@ -106,6 +109,7 @@ type PublicAccount struct {
 	Success          int              `json:"success"`
 	Fail             int              `json:"fail"`
 	LastUsedAt       string           `json:"lastUsedAt,omitempty"`
+	LastRefreshedAt  string           `json:"lastRefreshedAt,omitempty"`
 	Provider         string           `json:"provider"`
 	Disabled         bool             `json:"disabled"`
 	Note             string           `json:"note,omitempty"`
@@ -114,6 +118,7 @@ type PublicAccount struct {
 	SyncOrigin       string           `json:"syncOrigin,omitempty"`
 	LastSyncedAt     string           `json:"lastSyncedAt,omitempty"`
 	RemoteDisabled   *bool            `json:"remoteDisabled,omitempty"`
+	ImportedAt       string           `json:"importedAt,omitempty"`
 }
 
 type AccountUpdate struct {
@@ -161,11 +166,14 @@ type Store struct {
 	providerType   string
 	mu             sync.Mutex
 	states         map[string]RuntimeState
+	imageLeases    map[string]int
 	lastSyncRun    *SyncRunResult
 }
 
 var ErrSourceAccountNotFound = errors.New("source account not found")
 var ErrNoAvailableImageAuth = errors.New("no available image auth")
+var ErrImageAuthInUse = errors.New("image auth is in use")
+var ErrSelectedImageGroupsExhausted = errors.New("selected image groups exhausted")
 
 type stateEnvelope struct {
 	Accounts map[string]RuntimeState `json:"accounts"`
@@ -181,6 +189,7 @@ func NewStore(cfg *config.Config) (*Store, error) {
 		refreshWorkers: max(1, cfg.Accounts.RefreshWorkers),
 		providerType:   strings.TrimSpace(cfg.Sync.ProviderType),
 		states:         map[string]RuntimeState{},
+		imageLeases:    map[string]int{},
 	}
 
 	if err := os.MkdirAll(store.authDir, 0o755); err != nil {
@@ -558,7 +567,7 @@ func (s *Store) RefreshAccounts(ctx context.Context, accessTokens []string) (int
 			state.DefaultModelSlug = firstNonEmpty(result.info.DefaultModelSlug, state.DefaultModelSlug)
 			state.RestoreAt = firstNonEmpty(result.info.RestoreAt, state.RestoreAt)
 			state.LastRefreshedAt = time.Now().UTC().Format(time.RFC3339)
-			return state
+			return syncImageQuotaDailyBaseState(state, result.info.Quota, result.info.LimitsProgress, result.info.RestoreAt)
 		})
 		refreshed++
 	}
@@ -648,6 +657,35 @@ func (s *Store) FindImageAuthByID(accountID string) (*LocalAuth, PublicAccount, 
 	return nil, PublicAccount{}, ErrSourceAccountNotFound
 }
 
+func (s *Store) FindImageAuthByIDWithLease(accountID string) (*LocalAuth, PublicAccount, func(), error) {
+	localAuths, err := s.loadAuths()
+	if err != nil {
+		return nil, PublicAccount{}, nil, err
+	}
+	syncStates := s.loadAllSyncStates()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	target := strings.TrimSpace(accountID)
+	for _, auth := range localAuths {
+		if auth.AccessToken == "" || !s.matchesProvider(auth.Provider) {
+			continue
+		}
+		account := s.buildPublicAccount(auth, syncStates[auth.Name], nil)
+		if account.ID != target {
+			continue
+		}
+		release, leaseErr := s.acquireImageLeaseLocked(auth.AccessToken)
+		if leaseErr != nil {
+			return nil, PublicAccount{}, nil, leaseErr
+		}
+		return &auth, account, release, nil
+	}
+
+	return nil, PublicAccount{}, nil, ErrSourceAccountNotFound
+}
+
 func (s *Store) AcquireImageAuth(excluded map[string]struct{}) (*LocalAuth, PublicAccount, error) {
 	return s.acquireImageAuth(excluded, nil, false)
 }
@@ -658,6 +696,10 @@ func (s *Store) AcquireImageAuthFiltered(excluded map[string]struct{}, allow fun
 
 func (s *Store) AcquireImageAuthFilteredWithDisabledOption(excluded map[string]struct{}, allow func(PublicAccount) bool, allowDisabled bool) (*LocalAuth, PublicAccount, error) {
 	return s.acquireImageAuth(excluded, allow, allowDisabled)
+}
+
+func (s *Store) AcquireImageAuthLeaseFilteredWithDisabledOption(excluded map[string]struct{}, allow func(PublicAccount) bool, allowDisabled bool) (*LocalAuth, PublicAccount, func(), error) {
+	return s.acquireImageAuthWithLease(excluded, allow, allowDisabled)
 }
 
 func (s *Store) acquireImageAuth(excluded map[string]struct{}, allow func(PublicAccount) bool, allowDisabled bool) (*LocalAuth, PublicAccount, error) {
@@ -723,6 +765,113 @@ func (s *Store) acquireImageAuth(excluded map[string]struct{}, allow func(Public
 	return &selected.auth, selected.account, nil
 }
 
+func (s *Store) acquireImageAuthWithLease(excluded map[string]struct{}, allow func(PublicAccount) bool, allowDisabled bool) (*LocalAuth, PublicAccount, func(), error) {
+	localAuths, err := s.loadAuths()
+	if err != nil {
+		return nil, PublicAccount{}, nil, err
+	}
+	syncStates := s.loadAllSyncStates()
+	now := time.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	candidates := make([]struct {
+		auth    LocalAuth
+		account PublicAccount
+		ready   bool
+	}, 0, len(localAuths))
+
+	for _, auth := range localAuths {
+		account := s.buildPublicAccount(auth, syncStates[auth.Name], nil)
+		if _, blocked := excluded[auth.AccessToken]; blocked {
+			continue
+		}
+		if s.isImageLeasedLocked(auth.AccessToken) {
+			continue
+		}
+		if allow != nil && !allow(account) {
+			continue
+		}
+		ready := isUsableImageAccount(account, allowDisabled)
+		refreshNeeded := NeedsImageQuotaRefresh(account, now)
+		if auth.AccessToken == "" ||
+			(auth.Disabled && !allowDisabled) ||
+			(account.Status == "绂佺敤" && !allowDisabled) ||
+			account.Status == "寮傚父" ||
+			(!ready && !refreshNeeded) {
+			continue
+		}
+		candidates = append(candidates, struct {
+			auth    LocalAuth
+			account PublicAccount
+			ready   bool
+		}{auth: auth, account: account, ready: ready})
+	}
+
+	if len(candidates) == 0 {
+		return nil, PublicAccount{}, nil, fmt.Errorf("%w in %s", ErrNoAvailableImageAuth, s.authDir)
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		leftReady := candidates[i].ready
+		rightReady := candidates[j].ready
+		if leftReady != rightReady {
+			return leftReady
+		}
+		if candidates[i].account.Priority != candidates[j].account.Priority {
+			return candidates[i].account.Priority > candidates[j].account.Priority
+		}
+		if candidates[i].account.Fail != candidates[j].account.Fail {
+			return candidates[i].account.Fail < candidates[j].account.Fail
+		}
+		return candidates[i].account.LastUsedAt < candidates[j].account.LastUsedAt
+	})
+
+	selected := candidates[0]
+	release, leaseErr := s.acquireImageLeaseLocked(selected.auth.AccessToken)
+	if leaseErr != nil {
+		return nil, PublicAccount{}, nil, leaseErr
+	}
+	return &selected.auth, selected.account, release, nil
+}
+
+func (s *Store) acquireImageLeaseLocked(accessToken string) (func(), error) {
+	token := strings.TrimSpace(accessToken)
+	if token == "" {
+		return nil, fmt.Errorf("access token is required")
+	}
+	if s.imageLeases == nil {
+		s.imageLeases = map[string]int{}
+	}
+	if s.imageLeases[token] > 0 {
+		return nil, ErrImageAuthInUse
+	}
+	s.imageLeases[token]++
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			count := s.imageLeases[token]
+			if count <= 1 {
+				delete(s.imageLeases, token)
+				return
+			}
+			s.imageLeases[token] = count - 1
+		})
+	}, nil
+}
+
+func (s *Store) isImageLeasedLocked(accessToken string) bool {
+	token := strings.TrimSpace(accessToken)
+	if token == "" {
+		return false
+	}
+	return s.imageLeases[token] > 0
+}
+
 func (s *Store) RecordImageResult(accessToken string, success bool) {
 	auth, err := s.findAuthByToken(accessToken)
 	if err != nil {
@@ -772,6 +921,25 @@ func NeedsImageQuotaRefresh(account PublicAccount, now time.Time) bool {
 		return true
 	}
 	return !now.Before(resetAt)
+}
+
+func NeedsImageQuotaRefreshWithTTL(account PublicAccount, now time.Time, ttl time.Duration) bool {
+	hasQuotaMessage, resetAt, hasResetAt := imageGenQuotaWindow(account)
+	if !hasQuotaMessage {
+		return true
+	}
+	if hasResetAt && !now.Before(resetAt) {
+		return true
+	}
+
+	if ttl <= 0 {
+		ttl = 120 * time.Second
+	}
+	lastRefreshedAt, ok := parseFlexibleTime(account.LastRefreshedAt)
+	if !ok {
+		return true
+	}
+	return now.Sub(lastRefreshedAt) >= ttl
 }
 
 func isUsableImageAccount(account PublicAccount, allowDisabled bool) bool {
@@ -1086,6 +1254,7 @@ func (s *Store) loadAuths() ([]LocalAuth, error) {
 		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
 			continue
 		}
+		info, infoErr := entry.Info()
 		path := filepath.Join(s.authDir, entry.Name())
 		data := map[string]any{}
 		raw, err := os.ReadFile(path)
@@ -1106,6 +1275,7 @@ func (s *Store) loadAuths() ([]LocalAuth, error) {
 			Disabled:    boolValue(data["disabled"]),
 			Note:        strings.TrimSpace(stringValue(data["note"])),
 			Priority:    intValue(data["priority"]),
+			ImportedAt:  resolveAuthImportedAt(data, infoErr, info, entry.Name()),
 			Data:        data,
 		}
 		if !s.matchesProvider(auth.Provider) {
@@ -1180,6 +1350,7 @@ func (s *Store) buildPublicAccount(auth LocalAuth, syncState SyncState, remoteDi
 		Success:          state.Success,
 		Fail:             state.Fail,
 		LastUsedAt:       state.LastUsedAt,
+		LastRefreshedAt:  state.LastRefreshedAt,
 		Provider:         auth.Provider,
 		Disabled:         auth.Disabled,
 		Note:             auth.Note,
@@ -1188,6 +1359,7 @@ func (s *Store) buildPublicAccount(auth LocalAuth, syncState SyncState, remoteDi
 		SyncOrigin:       syncState.Origin,
 		LastSyncedAt:     syncState.LastSyncedAt,
 		RemoteDisabled:   remoteDisabled,
+		ImportedAt:       formatAccountImportedAt(auth.ImportedAt),
 	}
 }
 
@@ -1495,6 +1667,66 @@ func parseFlexibleTime(value string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+func resolveAuthImportedAt(data map[string]any, infoErr error, info os.FileInfo, fallbackName string) time.Time {
+	if parsed, ok := parseFlexibleTime(stringValue(data["created_at"])); ok {
+		return parsed
+	}
+	if parsed, ok := parseFlexibleTime(stringValue(data["imported_at"])); ok {
+		return parsed
+	}
+	if infoErr == nil && info != nil && !info.ModTime().IsZero() {
+		return info.ModTime()
+	}
+	if strings.TrimSpace(fallbackName) == "" {
+		return time.Time{}
+	}
+	return time.Time{}
+}
+
+func formatAccountImportedAt(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func syncImageQuotaDailyBaseState(state RuntimeState, quota int, limitsProgress []map[string]any, restoreAt string) RuntimeState {
+	remaining, resetAt, ok := extractImageQuotaSnapshot(limitsProgress, restoreAt, quota)
+	if !ok || remaining <= 0 {
+		return state
+	}
+
+	if resetAt != "" && strings.TrimSpace(state.ImageQuotaDailyBaseResetAt) != strings.TrimSpace(resetAt) {
+		state.ImageQuotaDailyBase = remaining
+		state.ImageQuotaDailyBaseResetAt = strings.TrimSpace(resetAt)
+		return state
+	}
+
+	if state.ImageQuotaDailyBase <= 0 {
+		state.ImageQuotaDailyBase = remaining
+	}
+	if strings.TrimSpace(state.ImageQuotaDailyBaseResetAt) == "" && strings.TrimSpace(resetAt) != "" {
+		state.ImageQuotaDailyBaseResetAt = strings.TrimSpace(resetAt)
+	}
+	return state
+}
+
+func extractImageQuotaSnapshot(limitsProgress []map[string]any, restoreAt string, quota int) (int, string, bool) {
+	for _, item := range limitsProgress {
+		if strings.TrimSpace(strings.ToLower(stringValue(item["feature_name"]))) != "image_gen" {
+			continue
+		}
+		remaining := intValue(item["remaining"])
+		resetAt := firstNonEmpty(stringValue(item["reset_after"]), restoreAt)
+		return max(0, remaining), resetAt, true
+	}
+
+	if quota > 0 {
+		return quota, strings.TrimSpace(restoreAt), true
+	}
+	return 0, strings.TrimSpace(restoreAt), false
 }
 
 func decodeAccessTokenPayload(token string) map[string]any {

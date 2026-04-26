@@ -2,7 +2,7 @@
 
 import type { ClipboardEvent as ReactClipboardEvent, ReactNode, RefObject } from "react";
 import Zoom from "react-medium-image-zoom";
-import { ArrowUp, CircleHelp, ImagePlus, LoaderCircle, Trash2, Upload } from "lucide-react";
+import { ArrowUp, CircleHelp, ImagePlus, Trash2, Upload } from "lucide-react";
 
 import { AppImage as Image } from "@/components/app-image";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,6 @@ type PromptComposerProps = {
   availableQuota: string;
   sourceImages: StoredSourceImage[];
   imagePrompt: string;
-  isSubmitting: boolean;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   uploadInputRef: RefObject<HTMLInputElement | null>;
   maskInputRef: RefObject<HTMLInputElement | null>;
@@ -72,7 +71,6 @@ export function PromptComposer({
   availableQuota,
   sourceImages,
   imagePrompt,
-  isSubmitting,
   textareaRef,
   uploadInputRef,
   maskInputRef,
@@ -89,6 +87,14 @@ export function PromptComposer({
   onSubmit,
 }: PromptComposerProps) {
   const imageQualityLabel = imageQualityOptions.find((item) => item.value === imageQuality)?.label ?? imageQuality;
+  const trimmedPrompt = imagePrompt.trim();
+  const sourceImageCount = sourceImages.filter((item) => item.role === "image").length;
+  const canSubmit =
+    mode === "generate"
+      ? trimmedPrompt.length > 0
+      : mode === "edit"
+        ? trimmedPrompt.length > 0 && sourceImageCount > 0
+        : sourceImageCount > 0;
   const sizeHintTooltip =
     mode === "generate" && !hasGenerateReferences ? (
       <span className="group relative inline-flex items-center align-middle">
@@ -274,7 +280,7 @@ export function PromptComposer({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  if (!isSubmitting) {
+                  if (canSubmit) {
                     void onSubmit();
                   }
                 }
@@ -319,11 +325,11 @@ export function PromptComposer({
               <button
                 type="button"
                 onClick={() => void onSubmit()}
-                disabled={isSubmitting}
+                disabled={!canSubmit}
                 className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-stone-950 text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
                 aria-label="提交图片任务"
               >
-                {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+                <ArrowUp className="size-4" />
               </button>
             </div>
           </div>

@@ -9,6 +9,21 @@ $backendStaticDir = Join-Path $backendDir "static"
 $packageDir = Join-Path $distDir "package"
 $packageDataDir = Join-Path $packageDir "data"
 $packageStaticDir = Join-Path $packageDir "static"
+$goExe = Join-Path $repoRoot ".tools\go1.26.2\go\bin\go.exe"
+
+if (-not (Test-Path $goExe)) {
+  $goExe = "go"
+}
+
+$env:GOMODCACHE = Join-Path $repoRoot ".gomodcache"
+$env:GOCACHE = Join-Path $repoRoot ".gocache"
+if (-not $env:GOPROXY) {
+  $env:GOPROXY = "https://goproxy.cn,direct"
+}
+if (-not $env:GOSUMDB) {
+  $env:GOSUMDB = "off"
+}
+New-Item -ItemType Directory -Force -Path $env:GOMODCACHE, $env:GOCACHE | Out-Null
 
 function Assert-LastExitCode {
   param(
@@ -54,7 +69,9 @@ $ldflags = @(
 
 Write-Host "[1/4] Building frontend..."
 Push-Location $webDir
-npm ci
+if (-not (Test-Path (Join-Path $webDir "node_modules\\.bin\\vite")) -or -not (Test-Path (Join-Path $webDir "node_modules\\.bin\\esbuild"))) {
+  npm ci --ignore-scripts
+}
 Assert-LastExitCode "npm ci"
 npm run build
 Assert-LastExitCode "npm run build"
@@ -70,7 +87,7 @@ Copy-Item -Path (Join-Path $webDir "dist\\*") -Destination $backendStaticDir -Re
 Write-Host "[3/4] Building backend..."
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 Push-Location $backendDir
-go build -ldflags $ldflags -o (Join-Path $distDir "chatgpt-image-studio.exe") .
+& $goExe build -ldflags $ldflags -o (Join-Path $distDir "chatgpt-image-studio.exe") .
 Assert-LastExitCode "go build"
 Pop-Location
 

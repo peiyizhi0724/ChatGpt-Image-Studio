@@ -35,14 +35,6 @@ import {
   shouldFallbackSelectionEdit,
 } from "../submit-utils";
 
-type ActiveRequestState = {
-  conversationId: string;
-  turnId: string;
-  mode: ImageMode;
-  count: number;
-  variant: "standard" | "selection-edit";
-};
-
 type UseImageSubmitOptions = {
   mode: ImageMode;
   imagePrompt: string;
@@ -56,16 +48,11 @@ type UseImageSubmitOptions = {
   upscaleScale: string;
   selectedConversationId: string | null;
   editorTarget: EditorTarget | null;
-  isSubmitting: boolean;
   makeId: () => string;
   focusConversation: (conversationId: string) => void;
   closeSelectionEditor: () => void;
   setImagePrompt: (value: string) => void;
   setSourceImages: (value: StoredSourceImage[]) => void;
-  setIsSubmitting: (value: boolean) => void;
-  setActiveRequest: (value: ActiveRequestState | null) => void;
-  setSubmitElapsedSeconds: (value: number) => void;
-  setSubmitStartedAt: (value: number | null) => void;
   persistConversation: (conversation: ImageConversation) => Promise<void>;
   updateConversation: (
     conversationId: string,
@@ -107,16 +94,11 @@ export function useImageSubmit({
   upscaleScale,
   selectedConversationId,
   editorTarget,
-  isSubmitting,
   makeId,
   focusConversation,
   closeSelectionEditor,
   setImagePrompt,
   setSourceImages,
-  setIsSubmitting,
-  setActiveRequest,
-  setSubmitElapsedSeconds,
-  setSubmitStartedAt,
   persistConversation,
   updateConversation,
   resetComposer,
@@ -166,16 +148,6 @@ export function useImageSubmit({
     });
 
     const startedAt = Date.now();
-    setIsSubmitting(true);
-    setActiveRequest({
-      conversationId,
-      turnId,
-      mode: "edit",
-      count: 1,
-      variant: "selection-edit",
-    });
-    setSubmitElapsedSeconds(0);
-    setSubmitStartedAt(startedAt);
     focusConversation(conversationId);
     setImagePrompt("");
     setSourceImages([]);
@@ -270,9 +242,6 @@ export function useImageSubmit({
       toast.error(message);
     } finally {
       finishImageTask(conversationId, turnId);
-      setIsSubmitting(false);
-      setActiveRequest(null);
-      setSubmitStartedAt(null);
     }
   }, [
     closeSelectionEditor,
@@ -280,22 +249,13 @@ export function useImageSubmit({
     focusConversation,
     imageModel,
     makeId,
-    setActiveRequest,
     setImagePrompt,
-    setIsSubmitting,
     setSourceImages,
-    setSubmitElapsedSeconds,
-    setSubmitStartedAt,
     updateConversation,
     upscaleScale,
   ]);
 
   const handleRetryTurn = useCallback(async (conversationId: string, turn: ImageConversationTurn) => {
-    if (isSubmitting) {
-      toast.error("正在处理中，请稍后再试");
-      return;
-    }
-
     const prompt = turn.prompt?.trim() ?? "";
     const turnMode = turn.mode || "generate";
     const turnSourceImages = Array.isArray(turn.sourceImages) ? turn.sourceImages : [];
@@ -333,16 +293,6 @@ export function useImageSubmit({
     });
 
     const startedAt = Date.now();
-    setIsSubmitting(true);
-    setActiveRequest({
-      conversationId,
-      turnId,
-      mode: turnMode,
-      count: expectedCount,
-      variant: "standard",
-    });
-    setSubmitElapsedSeconds(0);
-    setSubmitStartedAt(startedAt);
     focusConversation(conversationId);
     startImageTask({
       conversationId,
@@ -435,11 +385,8 @@ export function useImageSubmit({
       toast.error(message);
     } finally {
       finishImageTask(conversationId, turnId);
-      setIsSubmitting(false);
-      setActiveRequest(null);
-      setSubmitStartedAt(null);
     }
-  }, [focusConversation, isSubmitting, setActiveRequest, setIsSubmitting, setSubmitElapsedSeconds, setSubmitStartedAt, updateConversation, upscaleScale]);
+  }, [focusConversation, updateConversation, upscaleScale]);
 
   const handleSubmit = useCallback(async () => {
     const prompt = imagePrompt.trim();
@@ -481,16 +428,6 @@ export function useImageSubmit({
     });
 
     const startedAt = Date.now();
-    setIsSubmitting(true);
-    setActiveRequest({
-      conversationId,
-      turnId,
-      mode,
-      count: expectedCount,
-      variant: "standard",
-    });
-    setSubmitElapsedSeconds(0);
-    setSubmitStartedAt(startedAt);
     focusConversation(conversationId);
     setImagePrompt("");
     setSourceImages([]);
@@ -598,9 +535,6 @@ export function useImageSubmit({
       toast.error(message);
     } finally {
       finishImageTask(conversationId, turnId);
-      setIsSubmitting(false);
-      setActiveRequest(null);
-      setSubmitStartedAt(null);
     }
   }, [
     focusConversation,
@@ -616,12 +550,8 @@ export function useImageSubmit({
     persistConversation,
     resetComposer,
     selectedConversationId,
-    setActiveRequest,
     setImagePrompt,
-    setIsSubmitting,
     setSourceImages,
-    setSubmitElapsedSeconds,
-    setSubmitStartedAt,
     sourceImages,
     updateConversation,
     upscaleScale,

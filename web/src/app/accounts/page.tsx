@@ -60,6 +60,14 @@ import {
   type SyncStatus,
   type SyncStatusResponse,
 } from "@/lib/api";
+import {
+  buildImageAccountGroupPreviews,
+  getStoredImageAccountPolicy,
+  normalizeImageAccountPolicy,
+  setStoredImageAccountPolicy,
+  type ImageAccountSortMode,
+  type StoredImageAccountPolicy,
+} from "@/store/image-account-policy";
 import { getCachedSyncStatus, setCachedSyncStatus } from "@/store/sync-status-cache";
 import { cn } from "@/lib/utils";
 
@@ -114,6 +122,12 @@ const metricCards = [
   { key: "quota", label: "剩余额度", color: "text-blue-500", icon: RefreshCw },
 ] as const;
 
+const imagePolicySortOptions: Array<{ label: string; value: ImageAccountSortMode }> = [
+  { label: "导入时间", value: "imported_at" },
+  { label: "名字字母", value: "name" },
+  { label: "剩余额度", value: "quota" },
+];
+
 function formatCompact(value: number) {
   if (value >= 1000) {
     return `${(value / 1000).toFixed(1)}k`;
@@ -123,6 +137,22 @@ function formatCompact(value: number) {
 
 function formatQuota(value: number) {
   return String(Math.max(0, value));
+}
+
+function formatImportedAt(value?: string | null) {
+  if (!value) {
+    return "未记录";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function formatRestoreAt(value?: string | null) {
@@ -263,6 +293,7 @@ export default function AccountsPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
   const [isSyncLoading, setIsSyncLoading] = useState(true);
   const [syncRunningDirection, setSyncRunningDirection] = useState<"pull" | "push" | null>(null);
+  const [imagePolicy, setImagePolicy] = useState<StoredImageAccountPolicy>(() => getStoredImageAccountPolicy());
 
   const loadAccounts = async (silent = false) => {
     if (!silent) {
@@ -334,6 +365,10 @@ export default function AccountsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    setStoredImageAccountPolicy(imagePolicy);
+  }, [imagePolicy]);
+
   const filteredAccounts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return accounts.filter((account) => {
@@ -365,6 +400,32 @@ export default function AccountsPage() {
 
     return { total, active, limited, abnormal, disabled, quota };
   }, [accounts]);
+
+  const imagePolicyGroups = useMemo(() => buildImageAccountGroupPreviews(accounts, imagePolicy), [accounts, imagePolicy]);
+
+  useEffect(() => {
+    setImagePolicy((previous) => {
+      const normalized = normalizeImageAccountPolicy(previous);
+      const maxGroups = imagePolicyGroups.length;
+      const enabledGroupIndexes = normalized.enabledGroupIndexes.filter((index) => index < maxGroups);
+      const fallbackGroupIndexes =
+        maxGroups === 0
+          ? enabledGroupIndexes
+          : enabledGroupIndexes.length > 0
+            ? enabledGroupIndexes
+            : Array.from({ length: Math.min(2, maxGroups) }, (_, index) => index);
+
+      const next = {
+        ...normalized,
+        enabledGroupIndexes: fallbackGroupIndexes,
+      };
+
+      if (JSON.stringify(next) === JSON.stringify(previous)) {
+        return previous;
+      }
+      return next;
+    });
+  }, [imagePolicyGroups.length]);
 
   const selectedTokens = useMemo(() => {
     const selectedSet = new Set(selectedIds);
@@ -567,6 +628,22 @@ export default function AccountsPage() {
       return;
     }
     setSelectedIds((prev) => prev.filter((id) => !currentRows.some((row) => row.id === id)));
+  };
+
+  const updateImagePolicy = (patch: Partial<StoredImageAccountPolicy>) => {
+    setImagePolicy((previous) => normalizeImageAccountPolicy({ ...previous, ...patch }));
+  };
+
+  const toggleImagePolicyGroup = (groupIndex: number, enabled: boolean) => {
+    setImagePolicy((previous) => {
+      const nextGroupIndexes = enabled
+        ? Array.from(new Set([...previous.enabledGroupIndexes, groupIndex]))
+        : previous.enabledGroupIndexes.filter((value) => value !== groupIndex);
+      return normalizeImageAccountPolicy({
+        ...previous,
+        enabledGroupIndexes: nextGroupIndexes,
+      });
+    });
   };
 
   return (
@@ -797,6 +874,186 @@ export default function AccountsPage() {
             );
           })}
         </div>
+      </section>
+
+      <section className="mt-5">
+        <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
+          <CardContent className="space-y-5 p-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold tracking-tight text-stone-900">Free 账号分组策略</h2>
+                <p className="text-sm text-stone-500">
+                  仅对当前浏览器生效。这个浏览器发起的生图请求，会优先在勾选分组内轮询，并为每个账号保留您设置的安全阈值。
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={imagePolicy.enabled ? "success" : "secondary"} className="rounded-lg px-3 py-1">
+                  {imagePolicy.enabled ? "已启用" : "未启用"}
+                </Badge>
+                <Badge variant="info" className="rounded-lg px-3 py-1">
+                  已勾选分组：{imagePolicy.enabledGroupIndexes.length}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-stone-100 bg-stone-50 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-stone-800">启用策略</div>
+                    <div className="text-xs text-stone-500">不会写入后端全局配置</div>
+                  </div>
+                  <Checkbox
+                    checked={imagePolicy.enabled}
+                    onCheckedChange={(checked) => updateImagePolicy({ enabled: Boolean(checked) })}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-stone-100 bg-stone-50 p-4">
+                <div className="mb-2 text-sm font-medium text-stone-800">排序方式</div>
+                <Select
+                  value={imagePolicy.sortMode}
+                  onValueChange={(value) => updateImagePolicy({ sortMode: value as ImageAccountSortMode })}
+                >
+                  <SelectTrigger className="h-10 rounded-xl border-stone-200 bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {imagePolicySortOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {imagePolicy.sortMode === "quota" ? (
+                  <p className="mt-2 text-xs leading-5 text-amber-700">
+                    “剩余额度”是动态排序。刷新额度或生图后，分组成员可能重新洗牌。
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="rounded-2xl border border-stone-100 bg-stone-50 p-4">
+                <div className="mb-2 text-sm font-medium text-stone-800">每组账号数</div>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={imagePolicy.groupSize}
+                  onChange={(event) => updateImagePolicy({ groupSize: Number(event.target.value) || 1 })}
+                  className="h-10 rounded-xl border-stone-200 bg-white"
+                />
+                <p className="mt-2 text-xs text-stone-500">默认每组 10 个账号，可按您的风控偏好调整。</p>
+              </div>
+
+              <div className="rounded-2xl border border-stone-100 bg-stone-50 p-4">
+                <div className="mb-2 text-sm font-medium text-stone-800">保底阈值</div>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={imagePolicy.reservePercent}
+                  onChange={(event) => updateImagePolicy({ reservePercent: Number(event.target.value) || 0 })}
+                  className="h-10 rounded-xl border-stone-200 bg-white"
+                />
+                <p className="mt-2 text-xs text-stone-500">按当天首次看到的 image quota 为基准，默认保留 20%。</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                className="h-9 rounded-xl border-stone-200 bg-white text-stone-700"
+                onClick={() =>
+                  updateImagePolicy({
+                    enabledGroupIndexes: imagePolicyGroups.slice(0, Math.min(2, imagePolicyGroups.length)).map((group) => group.index),
+                  })
+                }
+                disabled={imagePolicyGroups.length === 0}
+              >
+                勾选前 2 组
+              </Button>
+              <Button
+                variant="outline"
+                className="h-9 rounded-xl border-stone-200 bg-white text-stone-700"
+                onClick={() =>
+                  updateImagePolicy({
+                    enabledGroupIndexes: imagePolicyGroups.map((group) => group.index),
+                  })
+                }
+                disabled={imagePolicyGroups.length === 0}
+              >
+                勾选全部分组
+              </Button>
+            </div>
+
+            <div className="grid gap-3 xl:grid-cols-2">
+              {imagePolicyGroups.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50 px-4 py-6 text-sm text-stone-500">
+                  先导入账号，这里才会生成自动分组预览。
+                </div>
+              ) : (
+                imagePolicyGroups.map((group) => (
+                  <div
+                    key={group.index}
+                    className={cn(
+                      "rounded-2xl border p-4 transition-colors",
+                      group.enabled
+                        ? "border-emerald-200 bg-emerald-50/70"
+                        : "border-stone-200 bg-stone-50",
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            checked={group.enabled}
+                            onCheckedChange={(checked) => toggleImagePolicyGroup(group.index, Boolean(checked))}
+                          />
+                          <span className="text-sm font-semibold text-stone-900">{group.label}</span>
+                          <Badge variant={group.enabled ? "success" : "secondary"} className="rounded-lg px-2 py-0.5">
+                            {group.enabled ? "参与轮询" : "不参与"}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-stone-500">
+                          共 {group.accounts.length} 个账号，可用 {group.availableCount} 个，当前总剩余 {group.totalRemaining}，
+                          组内平均剩余 {group.averageRemaining}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      <div className="rounded-xl bg-white/80 px-3 py-2 text-xs text-stone-600">
+                        <div className="text-stone-400">首个账号导入时间</div>
+                        <div className="mt-1 font-medium text-stone-800">
+                          {formatImportedAt(group.accounts[0]?.importedAt)}
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-white/80 px-3 py-2 text-xs text-stone-600">
+                        <div className="text-stone-400">末个账号导入时间</div>
+                        <div className="mt-1 font-medium text-stone-800">
+                          {formatImportedAt(group.accounts[group.accounts.length - 1]?.importedAt)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {group.accounts.slice(0, 6).map((account) => (
+                        <Badge key={account.id} variant="secondary" className="rounded-lg px-3 py-1 text-xs">
+                          {(account.email || account.fileName).slice(0, 24)}
+                        </Badge>
+                      ))}
+                      {group.accounts.length > 6 ? (
+                        <Badge variant="secondary" className="rounded-lg px-3 py-1 text-xs">
+                          另有 {group.accounts.length - 6} 个
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="mt-5 space-y-5">

@@ -11,22 +11,14 @@ import type { ImageConversationTurn, ImageMode, StoredImage } from "@/store/imag
 import { formatImageErrorMessage } from "../submit-utils";
 import { buildConversationSourceLabel, buildImageDataUrl } from "../view-utils";
 
-type ActiveRequestState = {
-  conversationId: string;
-  turnId: string;
-  mode: ImageMode;
-  count: number;
-  variant: "standard" | "selection-edit";
-};
+function formatTurnSizeLabel(size?: string) {
+  return String(size || "").trim().replace("x", "X");
+}
 
 type ProcessingStatus = {
   title: string;
   detail: string;
 };
-
-function formatTurnSizeLabel(size?: string) {
-  return String(size || "").trim().replace("x", "X");
-}
 
 function buildDownloadName(createdAt: string, turnId: string, index: number) {
   const date = new Date(createdAt);
@@ -75,7 +67,7 @@ type ConversationTurnsProps = {
   conversationId: string;
   turns: ImageConversationTurn[];
   modeLabelMap: Record<ImageMode, string>;
-  activeRequest: ActiveRequestState | null;
+  activeTurnKeys: Set<string>;
   isSubmitting: boolean;
   processingStatus: ProcessingStatus | null;
   waitingDots: string;
@@ -91,7 +83,7 @@ export function ConversationTurns({
   conversationId,
   turns,
   modeLabelMap,
-  activeRequest,
+  activeTurnKeys,
   isSubmitting,
   processingStatus,
   waitingDots,
@@ -105,12 +97,7 @@ export function ConversationTurns({
   return (
     <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-8 px-4 py-8 sm:px-6">
       {turns.map((turn) => {
-        const turnProcessing = Boolean(
-          isSubmitting &&
-            activeRequest &&
-            activeRequest.conversationId === conversationId &&
-            activeRequest.turnId === turn.id,
-        );
+        const turnProcessing = activeTurnKeys.has(`${conversationId}:${turn.id}`);
 
         return (
           <div key={turn.id} className="space-y-4">
@@ -268,7 +255,6 @@ export function ConversationTurns({
                                 type="button"
                                 className="inline-flex size-9 items-center justify-center rounded-full border border-stone-200 bg-white text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 onClick={() => void onRetryTurn(conversationId, turn)}
-                                disabled={isSubmitting}
                                 title={isSubmitting ? "处理中" : "重试"}
                                 aria-label="重试"
                               >
