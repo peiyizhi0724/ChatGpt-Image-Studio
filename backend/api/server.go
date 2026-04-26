@@ -399,6 +399,7 @@ func (s *Server) handleImageGenerations(w http.ResponseWriter, r *http.Request) 
 	if req.N < 1 {
 		req.N = 1
 	}
+	req.ResponseFormat = s.normalizeThirdPartyImageResponseFormat(r, req.ResponseFormat)
 
 	payload, err := s.executeImageGeneration(r.Context(), imageGenerationRequest{
 		Model:          req.Model,
@@ -414,6 +415,17 @@ func (s *Server) handleImageGenerations(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) normalizeThirdPartyImageResponseFormat(r *http.Request, requested string) string {
+	responseFormat := strings.TrimSpace(requested)
+	if responseFormat != "" && !strings.EqualFold(responseFormat, "url") {
+		return responseFormat
+	}
+	if s.isThirdPartyImageAPIRequest(r) {
+		return "b64_json"
+	}
+	return responseFormat
 }
 
 func (s *Server) handleImageEdits(w http.ResponseWriter, r *http.Request) {
@@ -768,6 +780,9 @@ func (s *Server) runImageRequest(ctx context.Context, authFile *accounts.LocalAu
 			}
 			return nil, true, err
 		}
+		if !preferredAccount && isRetryableImageRequestError(direction, err) {
+			return nil, true, err
+		}
 		if preferredAccount && isConversationContextError(err) {
 			return nil, false, newRequestError("source_context_missing", "原始图片对应会话已失效，请使用普通编辑重试")
 		}
@@ -866,6 +881,22 @@ func (s *Server) hasAnyBearer(r *http.Request, keys ...string) bool {
 
 func (s *Server) hasExactBearer(r *http.Request, key string) bool {
 	return strings.TrimSpace(key) != "" && bearerFromRequest(r) == strings.TrimSpace(key)
+}
+
+func (s *Server) isThirdPartyImageAPIRequest(r *http.Request) bool {
+	token := bearerFromRequest(r)
+	if token == "" || s == nil || s.cfg == nil {
+		return false
+	}
+	if strings.TrimSpace(s.cfg.App.AuthKey) != "" && token == strings.TrimSpace(s.cfg.App.AuthKey) {
+		return false
+	}
+	for _, key := range parseKeys(s.cfg.App.APIKey) {
+		if token == key {
+			return true
+		}
+	}
+	return false
 }
 
 func bearerFromRequest(r *http.Request) string {
@@ -1159,6 +1190,32 @@ func isConversationContextError(err error) bool {
 func isInvalidRefreshError(message string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(message)), "封号") ||
 		strings.Contains(strings.ToLower(strings.TrimSpace(message)), "http 401")
+}
+
+func isRetryableImageRequestError(direction string, err error) bool {
+	if err == nil {
+		return false
+	}
+	if strings.TrimSpace(direction) != "official" {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if message == "" {
+		return false
+	}
+	if strings.Contains(message, "sse read error") {
+		return false
+	}
+	return strings.Contains(message, "conversation request:") ||
+		strings.Contains(message, "responses request:") ||
+		strings.Contains(message, "unexpected eof") ||
+		strings.Contains(message, ": eof") ||
+		strings.Contains(message, "context deadline exceeded") ||
+		strings.Contains(message, "i/o timeout") ||
+		strings.Contains(message, "tls handshake timeout") ||
+		strings.Contains(message, "connection reset by peer") ||
+		strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "dial tcp")
 }
 
 func isImageAccountUsable(account accounts.PublicAccount) bool {

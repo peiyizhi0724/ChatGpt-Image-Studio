@@ -123,6 +123,37 @@ func TestHandleImageResponsesReturns400ForInvalidImageInput(t *testing.T) {
 	}
 }
 
+func TestNormalizeThirdPartyImageResponseFormatForThirdPartyKey(t *testing.T) {
+	server := &Server{
+		cfg: &config.Config{
+			App: config.AppConfig{
+				APIKey:  "third-party-key",
+				AuthKey: "ui-key",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	req.Header.Set("Authorization", "Bearer third-party-key")
+	if got := server.normalizeThirdPartyImageResponseFormat(req, ""); got != "b64_json" {
+		t.Fatalf("normalizeThirdPartyImageResponseFormat(empty) = %q, want %q", got, "b64_json")
+	}
+	if got := server.normalizeThirdPartyImageResponseFormat(req, "url"); got != "b64_json" {
+		t.Fatalf("normalizeThirdPartyImageResponseFormat(url) = %q, want %q", got, "b64_json")
+	}
+	if got := server.normalizeThirdPartyImageResponseFormat(req, "b64_json"); got != "b64_json" {
+		t.Fatalf("normalizeThirdPartyImageResponseFormat(b64_json) = %q, want %q", got, "b64_json")
+	}
+
+	uiReq := httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	uiReq.Header.Set("Authorization", "Bearer ui-key")
+	if got := server.normalizeThirdPartyImageResponseFormat(uiReq, ""); got != "" {
+		t.Fatalf("normalizeThirdPartyImageResponseFormat(ui empty) = %q, want empty string", got)
+	}
+	if got := server.normalizeThirdPartyImageResponseFormat(uiReq, "url"); got != "url" {
+		t.Fatalf("normalizeThirdPartyImageResponseFormat(ui url) = %q, want %q", got, "url")
+	}
+}
 func TestBuildCompatResponsesResponse(t *testing.T) {
 	payload := map[string]any{
 		"created": int64(1710000000),

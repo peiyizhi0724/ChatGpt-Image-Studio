@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { fetchConfig, fetchDefaultConfig, updateConfig, type ConfigPayload } from "@/lib/api";
 import { clearCachedSyncStatus } from "@/store/sync-status-cache";
+import { APIAccessSection } from "./components/api-access-section";
 import { ImageModeSection } from "./components/image-mode-section";
 import { RuntimeSection } from "./components/runtime-section";
 import { ServicePathsSection } from "./components/service-paths-section";
@@ -259,6 +260,8 @@ export default function SettingsPage() {
           syncManagementKeyStatus={syncManagementKeyStatus}
           setSection={setSection}
         />
+
+        <APIAccessSection config={config} setSection={setSection} />
 
         <RuntimeSection config={config} setSection={setSection} />
 

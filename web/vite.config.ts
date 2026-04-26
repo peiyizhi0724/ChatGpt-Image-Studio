@@ -11,15 +11,19 @@ const __dirname = path.dirname(__filename);
 const backendStaticDir = path.resolve(__dirname, "../backend/static");
 
 function syncBackendStaticPlugin(): PluginOption {
+  let outDir = path.resolve(__dirname, "dist");
+
   return {
     name: "sync-backend-static",
     apply: "build",
-    async closeBundle() {
-      const sourceDir = path.resolve(__dirname, "dist");
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    async writeBundle() {
       await fs.rm(backendStaticDir, { recursive: true, force: true });
       await fs.mkdir(backendStaticDir, { recursive: true });
-      await fs.cp(sourceDir, backendStaticDir, { recursive: true });
-      console.log(`[vite] synced ${sourceDir} -> ${backendStaticDir}`);
+      await fs.cp(outDir, backendStaticDir, { recursive: true });
+      console.log(`[vite] synced ${outDir} -> ${backendStaticDir}`);
     },
   };
 }
