@@ -105,6 +105,24 @@ export function setStoredImageAccountPolicy(policy: StoredImageAccountPolicy) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeImageAccountPolicy(policy)));
 }
 
+export function getEffectiveImageAccountPolicy(
+  policy: Partial<StoredImageAccountPolicy> | null | undefined,
+  options: {
+    groupCount?: number | null;
+  } = {},
+) {
+  const normalized = normalizeImageAccountPolicy(policy);
+  const { groupCount } = options;
+  if (typeof groupCount !== "number" || groupCount < 0) {
+    return normalized;
+  }
+
+  return {
+    ...normalized,
+    enabledGroupIndexes: normalized.enabledGroupIndexes.filter((index) => index < groupCount),
+  };
+}
+
 function encodeBase64Url(raw: string) {
   const bytes = new TextEncoder().encode(raw);
   let binary = "";
@@ -115,11 +133,11 @@ function encodeBase64Url(raw: string) {
 }
 
 export function buildImageAccountPolicyHeader(policy = getStoredImageAccountPolicy()) {
-  const normalized = normalizeImageAccountPolicy(policy);
-  if (!normalized.enabled) {
+  const effectivePolicy = getEffectiveImageAccountPolicy(policy);
+  if (!effectivePolicy.enabled) {
     return "";
   }
-  return encodeBase64Url(JSON.stringify(normalized));
+  return encodeBase64Url(JSON.stringify(effectivePolicy));
 }
 
 function parseDateValue(value?: string | null) {
@@ -173,6 +191,8 @@ export function buildImageAccountGroupPreviews(
 ) {
   const normalized = normalizeImageAccountPolicy(policy);
   const sortedAccounts = sortAccountsForImagePolicy(accounts, normalized.sortMode);
+  const groupCount = normalized.groupSize > 0 ? Math.ceil(sortedAccounts.length / normalized.groupSize) : 0;
+  const effectivePolicy = getEffectiveImageAccountPolicy(normalized, { groupCount });
   const groups: ImageAccountGroupPreview[] = [];
 
   for (let index = 0; index < sortedAccounts.length; index += normalized.groupSize) {
@@ -180,7 +200,7 @@ export function buildImageAccountGroupPreviews(
     groups.push({
       index: groups.length,
       label: `第 ${groups.length + 1} 组`,
-      enabled: normalized.enabledGroupIndexes.includes(groups.length),
+      enabled: effectivePolicy.enabledGroupIndexes.includes(groups.length),
       accounts: groupAccounts,
       availableCount: groupAccounts.filter(isAvailableAccount).length,
       totalRemaining: groupAccounts.reduce((sum, account) => sum + currentImageRemaining(account), 0),

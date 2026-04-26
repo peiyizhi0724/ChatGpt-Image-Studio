@@ -62,6 +62,7 @@ import {
 } from "@/lib/api";
 import {
   buildImageAccountGroupPreviews,
+  getEffectiveImageAccountPolicy,
   getStoredImageAccountPolicy,
   normalizeImageAccountPolicy,
   setStoredImageAccountPolicy,
@@ -402,30 +403,28 @@ export default function AccountsPage() {
   }, [accounts]);
 
   const imagePolicyGroups = useMemo(() => buildImageAccountGroupPreviews(accounts, imagePolicy), [accounts, imagePolicy]);
-
-  useEffect(() => {
-    setImagePolicy((previous) => {
-      const normalized = normalizeImageAccountPolicy(previous);
-      const maxGroups = imagePolicyGroups.length;
-      const enabledGroupIndexes = normalized.enabledGroupIndexes.filter((index) => index < maxGroups);
-      const fallbackGroupIndexes =
-        maxGroups === 0
-          ? enabledGroupIndexes
-          : enabledGroupIndexes.length > 0
-            ? enabledGroupIndexes
-            : Array.from({ length: Math.min(2, maxGroups) }, (_, index) => index);
-
-      const next = {
-        ...normalized,
-        enabledGroupIndexes: fallbackGroupIndexes,
-      };
-
-      if (JSON.stringify(next) === JSON.stringify(previous)) {
-        return previous;
-      }
-      return next;
-    });
-  }, [imagePolicyGroups.length]);
+  const effectiveImagePolicy = useMemo(
+    () => getEffectiveImageAccountPolicy(imagePolicy, { groupCount: imagePolicyGroups.length }),
+    [imagePolicy, imagePolicyGroups.length],
+  );
+  const effectiveEnabledGroupCount = useMemo(
+    () => imagePolicyGroups.filter((group) => group.enabled).length,
+    [imagePolicyGroups],
+  );
+  const configuredGroupSummary = useMemo(
+    () =>
+      imagePolicy.enabledGroupIndexes.length > 0
+        ? imagePolicy.enabledGroupIndexes.map((index) => index + 1).join(" / ")
+        : "未选择",
+    [imagePolicy.enabledGroupIndexes],
+  );
+  const effectiveGroupSummary = useMemo(
+    () =>
+      effectiveImagePolicy.enabledGroupIndexes.length > 0
+        ? effectiveImagePolicy.enabledGroupIndexes.map((index) => index + 1).join(" / ")
+        : "当前无可发送分组",
+    [effectiveImagePolicy.enabledGroupIndexes],
+  );
 
   const selectedTokens = useMemo(() => {
     const selectedSet = new Set(selectedIds);
@@ -885,14 +884,34 @@ export default function AccountsPage() {
                 <p className="text-sm text-stone-500">
                   仅对当前浏览器生效。这个浏览器发起的生图请求，会优先在勾选分组内轮询，并为每个账号保留您设置的安全阈值。
                 </p>
+                {imagePolicy.enabledGroupIndexes.length !== effectiveImagePolicy.enabledGroupIndexes.length ? (
+                  <p className="mt-2 text-xs leading-5 text-stone-500">
+                    当前部分已选组在本次分组下暂时不可见，但本地选择会保留，不会被重置。
+                  </p>
+                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={imagePolicy.enabled ? "success" : "secondary"} className="rounded-lg px-3 py-1">
                   {imagePolicy.enabled ? "已启用" : "未启用"}
                 </Badge>
                 <Badge variant="info" className="rounded-lg px-3 py-1">
-                  已勾选分组：{imagePolicy.enabledGroupIndexes.length}
+                  已勾选分组：{effectiveEnabledGroupCount}
                 </Badge>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-stone-100 bg-stone-50 px-4 py-4">
+                <div className="text-xs font-medium text-stone-400">当前本地保存分组</div>
+                <div className="mt-2 text-base font-semibold tracking-tight text-stone-900">{configuredGroupSummary}</div>
+                <p className="mt-1 text-xs text-stone-500">这是浏览器 localStorage 中保存的原始勾选结果。</p>
+              </div>
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-4">
+                <div className="text-xs font-medium text-emerald-700">当前实际发送分组</div>
+                <div className="mt-2 text-base font-semibold tracking-tight text-emerald-900">{effectiveGroupSummary}</div>
+                <p className="mt-1 text-xs text-emerald-700">
+                  生图请求头会按这里的分组发送；超出当前分组范围的历史选择只会被临时忽略，不会被重置。
+                </p>
               </div>
             </div>
 
