@@ -5,7 +5,31 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-$(pwd)}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-production}"
 DEPLOY_REPO_URL="${DEPLOY_REPO_URL:-}"
-HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:7000/image}"
+HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:7000/health}"
+
+normalize_healthcheck_url() {
+  case "$1" in
+    http://127.0.0.1:*/image|http://localhost:*/image|https://127.0.0.1:*/image|https://localhost:*/image)
+      printf '%s/health\n' "${1%/image}"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
+dump_diagnostics() {
+  echo "[deploy] dumping diagnostics"
+  docker compose ps || true
+  docker compose logs --tail=200 studio || true
+  if [ -n "${HEALTHCHECK_URL:-}" ]; then
+    echo "[deploy] probe: $HEALTHCHECK_URL"
+    curl -iS --max-time 10 "$HEALTHCHECK_URL" || true
+  fi
+}
+
+HEALTHCHECK_URL="$(normalize_healthcheck_url "$HEALTHCHECK_URL")"
+trap 'status=$?; echo "[deploy] failed with exit code $status" >&2; dump_diagnostics; exit $status' ERR
 
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"

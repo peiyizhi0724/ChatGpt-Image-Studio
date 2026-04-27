@@ -37,7 +37,7 @@ Required repository secrets:
 - `DEPLOY_PORT`: SSH port
 - `DEPLOY_SSH_PRIVATE_KEY`: private key used by GitHub Actions
 - `DEPLOY_APP_DIR`: app path on the server, for example `/opt/projects/ChatGpt-Image-Studio`
-- `HEALTHCHECK_URL`: optional healthcheck URL, for example `http://127.0.0.1:7000/image`
+- `HEALTHCHECK_URL`: optional healthcheck URL, for example `http://127.0.0.1:7000/health`
 
 The server-side deploy script is `scripts/deploy-production.sh`.
 It pulls the latest `production` branch, rebuilds the containers with `docker compose up -d --build`, and waits for the healthcheck to return success.
