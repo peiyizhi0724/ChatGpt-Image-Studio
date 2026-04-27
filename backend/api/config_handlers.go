@@ -85,6 +85,18 @@ type configPayload struct {
 		RequestTimeout int    `json:"requestTimeout"`
 		RouteStrategy  string `json:"routeStrategy"`
 	} `json:"cpa"`
+	Mail struct {
+		Enabled        bool   `json:"enabled"`
+		SMTPHost       string `json:"smtpHost"`
+		SMTPPort       int    `json:"smtpPort"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		FromAddress    string `json:"fromAddress"`
+		FromName       string `json:"fromName"`
+		UseImplicitTLS bool   `json:"useImplicitTLS"`
+		CodeTTLMinutes int    `json:"codeTTLMinutes"`
+		ResendInterval int    `json:"resendInterval"`
+	} `json:"mail"`
 	NewAPI struct {
 		BaseURL        string `json:"baseUrl"`
 		Username       string `json:"username"`
@@ -211,6 +223,18 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			"request_timeout": payload.CPA.RequestTimeout,
 			"route_strategy":  payload.CPA.RouteStrategy,
 		},
+		"mail": {
+			"enabled":                 payload.Mail.Enabled,
+			"smtp_host":               payload.Mail.SMTPHost,
+			"smtp_port":               payload.Mail.SMTPPort,
+			"username":                payload.Mail.Username,
+			"password":                payload.Mail.Password,
+			"from_address":            payload.Mail.FromAddress,
+			"from_name":               payload.Mail.FromName,
+			"use_implicit_tls":        payload.Mail.UseImplicitTLS,
+			"code_ttl_minutes":        payload.Mail.CodeTTLMinutes,
+			"resend_interval_seconds": payload.Mail.ResendInterval,
+		},
 		"newapi": {
 			"base_url":        payload.NewAPI.BaseURL,
 			"username":        payload.NewAPI.Username,
@@ -330,6 +354,17 @@ func (s *Server) buildConfigPayloadFromConfig(cfg *config.Config) configPayload 
 	payload.CPA.APIKey = cfg.CPA.APIKey
 	payload.CPA.RequestTimeout = cfg.CPA.RequestTimeout
 	payload.CPA.RouteStrategy = cfg.CPA.RouteStrategy
+
+	payload.Mail.Enabled = cfg.Mail.Enabled
+	payload.Mail.SMTPHost = cfg.Mail.SMTPHost
+	payload.Mail.SMTPPort = cfg.Mail.SMTPPort
+	payload.Mail.Username = cfg.Mail.Username
+	payload.Mail.Password = cfg.Mail.Password
+	payload.Mail.FromAddress = cfg.Mail.FromAddress
+	payload.Mail.FromName = cfg.Mail.FromName
+	payload.Mail.UseImplicitTLS = cfg.Mail.UseImplicitTLS
+	payload.Mail.CodeTTLMinutes = cfg.Mail.CodeTTLMinutes
+	payload.Mail.ResendInterval = cfg.Mail.ResendInterval
 
 	payload.NewAPI.BaseURL = cfg.NewAPI.BaseURL
 	payload.NewAPI.Username = cfg.NewAPI.Username

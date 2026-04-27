@@ -25,6 +25,7 @@ var chibiPNG []byte
 var characterPNG []byte
 
 type Sender struct {
+	enabled        bool
 	host           string
 	port           int
 	username       string
@@ -51,6 +52,7 @@ func NewSender(cfg config.MailConfig) *Sender {
 	}
 
 	return &Sender{
+		enabled:        cfg.Enabled,
 		host:           host,
 		port:           port,
 		username:       username,
@@ -63,6 +65,7 @@ func NewSender(cfg config.MailConfig) *Sender {
 
 func (s *Sender) Enabled() bool {
 	return s != nil &&
+		s.enabled &&
 		s.host != "" &&
 		s.port > 0 &&
 		s.username != "" &&
