@@ -32,7 +32,8 @@ jobs:
         run: |
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" <<'EOF'
             export APP_DIR='${{ secrets.DEPLOY_APP_DIR }}'
-            export DEPLOY_BRANCH='production'
+            export DEPLOY_BRANCH='${{ github.ref_name }}'
+            export DEPLOY_REPO_URL='${{ github.server_url }}/${{ github.repository }}.git'
             export HEALTHCHECK_URL='${{ secrets.HEALTHCHECK_URL }}'
             cd "$APP_DIR"
             chmod +x scripts/deploy-production.sh
