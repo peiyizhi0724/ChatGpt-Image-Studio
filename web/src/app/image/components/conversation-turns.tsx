@@ -10,10 +10,12 @@ import {
   LoaderCircle,
   RotateCcw,
   Sparkles,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppImage as Image } from "@/components/app-image";
+import type { ImageTaskView } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
   ImageConversationTurn,
@@ -40,6 +42,23 @@ type ProcessingStatus = {
   title: string;
   detail: string;
 };
+
+function formatWaitingReason(reason?: string) {
+  switch (String(reason || "").trim()) {
+    case "global_concurrency":
+      return "等待全局并发槽位";
+    case "paid_account_busy":
+      return "等待 Paid 图片账号空闲";
+    case "compatible_account_busy":
+      return "等待兼容图片账号空闲";
+    case "source_account_busy":
+      return "等待原始图片所属账号空闲";
+    case "retry_backoff":
+      return "任务临时失败，正在自动重试";
+    default:
+      return "等待可用图片账号或并发槽位";
+  }
+}
 
 function formatTurnSizeLabel(size?: string) {
   return String(size || "")
@@ -95,7 +114,8 @@ type ConversationTurnsProps = {
   turns: ImageConversationTurn[];
   modeLabelMap: Record<ImageMode, string>;
   activeRequest: ActiveRequestState | null;
-  isSubmitting: boolean;
+  activeTaskByTurnId: Map<string, ImageTaskView>;
+  cancellingTaskIds: string[];
   processingStatus: ProcessingStatus | null;
   waitingDots: string;
   submitElapsedSeconds: number;
@@ -115,6 +135,11 @@ type ConversationTurnsProps = {
   onRetryTurn: (
     conversationId: string,
     turn: ImageConversationTurn,
+    imageIndex?: number,
+  ) => Promise<void>;
+  onCancelTurn: (
+    conversationId: string,
+    turn: ImageConversationTurn,
   ) => Promise<void>;
 };
 
@@ -123,7 +148,8 @@ export const ConversationTurns = memo(function ConversationTurns({
   turns,
   modeLabelMap,
   activeRequest,
-  isSubmitting,
+  activeTaskByTurnId,
+  cancellingTaskIds,
   processingStatus,
   waitingDots,
   submitElapsedSeconds,
@@ -132,16 +158,57 @@ export const ConversationTurns = memo(function ConversationTurns({
   onOpenSelectionEditor,
   onSeedFromResult,
   onRetryTurn,
+  onCancelTurn,
 }: ConversationTurnsProps) {
   return (
     <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-8 px-4 pt-0 pb-8 sm:px-6 sm:py-8">
       {turns.map((turn) => {
         const turnProcessing = Boolean(
-          isSubmitting &&
           activeRequest &&
           activeRequest.conversationId === conversationId &&
           activeRequest.turnId === turn.id,
         );
+        const runtimeTask = activeTaskByTurnId.get(turn.id) ?? null;
+        const cancelTaskId = runtimeTask?.id || "";
+        const cancelPending = Boolean(
+          cancelTaskId && cancellingTaskIds.includes(cancelTaskId),
+        );
+        const isCancelableTask =
+          Boolean(cancelTaskId) &&
+          runtimeTask?.status === "queued" ||
+          Boolean(cancelTaskId) &&
+          runtimeTask?.status === "running" ||
+          Boolean(cancelTaskId) &&
+          runtimeTask?.status === "cancel_requested";
+        const cancelRequested =
+          turn.cancelRequested ||
+          runtimeTask?.cancelRequested ||
+          runtimeTask?.status === "cancel_requested";
+        const effectiveTaskStatus =
+          runtimeTask?.status ||
+          (cancelRequested
+            ? "cancel_requested"
+            : turn.status === "queued"
+              ? "queued"
+              : turn.status === "running" || turn.status === "generating"
+                ? "running"
+                : turn.status === "cancelled"
+                  ? "cancelled"
+                  : "");
+        const showQueuedState = effectiveTaskStatus === "queued";
+        const showRunningState =
+          effectiveTaskStatus === "running" ||
+          effectiveTaskStatus === "cancel_requested";
+        const disableCancel =
+          cancelPending || cancelRequested || !cancelTaskId;
+        const cancelLabel =
+          cancelPending || cancelRequested
+            ? "取消中"
+            : runtimeTask?.status === "running"
+              ? "取消任务"
+              : cancelTaskId
+              ? "取消排队"
+              : "准备中";
 
         return (
           <div key={turn.id} className="space-y-4">
@@ -213,6 +280,25 @@ export const ConversationTurns = memo(function ConversationTurns({
                 <span className="rounded-full bg-stone-100 px-3 py-1.5">
                   {turn.count} 张
                 </span>
+                {cancelRequested ? (
+                  <span className="rounded-full bg-rose-50 px-3 py-1.5 text-rose-700">
+                    取消中
+                  </span>
+                ) : showQueuedState ? (
+                  <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">
+                    排队中{turn.queuePosition ? ` · #${turn.queuePosition}` : ""}
+                  </span>
+                ) : null}
+                {showRunningState ? (
+                  <span className="rounded-full bg-sky-50 px-3 py-1.5 text-sky-700">
+                    处理中
+                  </span>
+                ) : null}
+                {effectiveTaskStatus === "cancelled" ? (
+                  <span className="rounded-full bg-stone-200 px-3 py-1.5 text-stone-600">
+                    已取消
+                  </span>
+                ) : null}
                 {turn.size ? (
                   <span className="rounded-full bg-stone-100 px-3 py-1.5">
                     {formatTurnSizeLabel(turn.size)}
@@ -256,8 +342,10 @@ export const ConversationTurns = memo(function ConversationTurns({
                         key={image.id}
                         className={cn(
                           "overflow-hidden rounded-[22px] border border-stone-200 bg-white shadow-sm",
-                          turn.images.length === 1 &&
+                          image.status === "success" &&
                             "w-fit max-w-full justify-self-start",
+                          image.status !== "success" &&
+                            "w-full max-w-[360px] justify-self-start",
                         )}
                       >
                         {image.status === "success" && imageDataUrl ? (
@@ -327,10 +415,10 @@ export const ConversationTurns = memo(function ConversationTurns({
                                 type="button"
                                 className="inline-flex size-9 items-center justify-center rounded-full border border-stone-200 bg-white text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 onClick={() =>
-                                  void onRetryTurn(conversationId, turn)
+                                  void onRetryTurn(conversationId, turn, index)
                                 }
-                                disabled={isSubmitting}
-                                title={isSubmitting ? "处理中" : "重试"}
+                                disabled={turnProcessing}
+                                title={turnProcessing ? "处理中" : "重试"}
                                 aria-label="重试"
                               >
                                 <RotateCcw className="size-4" />
@@ -343,20 +431,43 @@ export const ConversationTurns = memo(function ConversationTurns({
                               <LoaderCircle className="size-5 animate-spin" />
                             </div>
                             <p className="text-sm font-medium text-stone-700">
-                              {turnProcessing && processingStatus
+                              {cancelRequested
+                                ? "正在取消任务"
+                                : showQueuedState
+                                ? "已加入等候队列"
+                                : turnProcessing && processingStatus
                                 ? `${processingStatus.title}${waitingDots}`
                                 : "正在处理图片..."}
                             </p>
                             <p className="text-xs leading-6 text-stone-400">
-                              {turnProcessing && processingStatus
+                              {cancelRequested
+                                ? "正在等待当前请求结束，取消后将丢弃本次结果"
+                                : showQueuedState
+                                ? `${turn.waitingDetail || formatWaitingReason(turn.waitingReason)}${(turn.queuePosition ?? 0) > 1 ? ` · 前面还有 ${turn.queuePosition! - 1} 个` : ""}`
+                                : turnProcessing && processingStatus
                                 ? `${processingStatus.detail} · 已等待 ${formatProcessingDuration(submitElapsedSeconds)}`
-                                : "图片处理通常需要几十秒，请稍候"}
+                                : "图片处理通常需要几分钟，请稍候"}
                             </p>
                           </div>
                         )}
                       </div>
                     );
                   })}
+                </div>
+              ) : null}
+              {isCancelableTask ? (
+                <div className="flex px-1">
+                  <button
+                    type="button"
+                    onClick={() => void onCancelTurn(conversationId, turn)}
+                    disabled={disableCancel}
+                    className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-400 disabled:hover:bg-white disabled:hover:text-stone-400"
+                    title={cancelLabel}
+                    aria-label={cancelLabel}
+                  >
+                    <X className="size-4" />
+                    {cancelLabel}
+                  </button>
                 </div>
               ) : null}
             </div>

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -142,6 +143,212 @@ func (c *compatStubWorkflowClient) LastRoute() string {
 
 func (c *compatStubWorkflowClient) LastModelLabel() string {
 	return c.model
+}
+
+type parallelGenerateWorkflowClient struct {
+	token     string
+	active    *int32
+	maxActive *int32
+	delay     time.Duration
+}
+
+func (c *parallelGenerateWorkflowClient) DownloadBytes(url string) ([]byte, error) {
+	return []byte("parallel:" + url), nil
+}
+
+func (c *parallelGenerateWorkflowClient) DownloadAsBase64(ctx context.Context, url string) (string, error) {
+	_ = ctx
+	return base64.StdEncoding.EncodeToString([]byte("parallel:" + url)), nil
+}
+
+func (c *parallelGenerateWorkflowClient) GenerateImage(ctx context.Context, prompt, model string, n int, size, quality, background string) ([]handler.ImageResult, error) {
+	_ = prompt
+	_ = model
+	_ = n
+	_ = size
+	_ = quality
+	_ = background
+
+	active := atomic.AddInt32(c.active, 1)
+	for {
+		maxActive := atomic.LoadInt32(c.maxActive)
+		if active <= maxActive || atomic.CompareAndSwapInt32(c.maxActive, maxActive, active) {
+			break
+		}
+	}
+	defer atomic.AddInt32(c.active, -1)
+	if c.delay > 0 {
+		timer := time.NewTimer(c.delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	return []handler.ImageResult{
+		{
+			URL:           "stub://parallel/" + c.token,
+			RevisedPrompt: "parallel",
+		},
+	}, nil
+}
+
+func (c *parallelGenerateWorkflowClient) EditImageByUpload(ctx context.Context, prompt, model string, images [][]byte, mask []byte, size, quality string) ([]handler.ImageResult, error) {
+	_ = ctx
+	_ = prompt
+	_ = model
+	_ = images
+	_ = mask
+	_ = size
+	_ = quality
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (c *parallelGenerateWorkflowClient) InpaintImageByMask(ctx context.Context, prompt string, model string, originalFileID string, originalGenID string, conversationID string, parentMessageID string, mask []byte) ([]handler.ImageResult, error) {
+	_ = ctx
+	_ = prompt
+	_ = model
+	_ = originalFileID
+	_ = originalGenID
+	_ = conversationID
+	_ = parentMessageID
+	_ = mask
+	return nil, fmt.Errorf("not implemented")
+}
+
+func TestImageGenerationsRunConcurrentlyAcrossAvailableAccounts(t *testing.T) {
+	server, recorder := newImageModeCompatTestServerWithOptions(t, imageModeCompatScenario{
+		imageMode:   "studio",
+		accountType: "Free",
+		freeRoute:   "legacy",
+		freeModel:   "auto",
+		paidRoute:   "responses",
+		paidModel:   "gpt-5.4-mini",
+	}, compatTestServerOptions{
+		accounts: []compatSeedAccount{
+			{
+				fileName:    "parallel-1.json",
+				accessToken: "token-parallel-1",
+				accountType: "Free",
+				priority:    30,
+				quota:       5,
+				status:      "正常",
+			},
+			{
+				fileName:    "parallel-2.json",
+				accessToken: "token-parallel-2",
+				accountType: "Free",
+				priority:    20,
+				quota:       5,
+				status:      "正常",
+			},
+			{
+				fileName:    "parallel-3.json",
+				accessToken: "token-parallel-3",
+				accountType: "Free",
+				priority:    10,
+				quota:       5,
+				status:      "正常",
+			},
+		},
+	})
+
+	var active int32
+	var maxActive int32
+	server.officialClientFactory = func(accessToken, proxyURL string, authData map[string]any, requestConfig handler.ImageRequestConfig) imageWorkflowClient {
+		_ = proxyURL
+		_ = authData
+		_ = requestConfig
+		recorder.officialCalls++
+		return &parallelGenerateWorkflowClient{
+			token:     accessToken,
+			active:    &active,
+			maxActive: &maxActive,
+			delay:     150 * time.Millisecond,
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"prompt":"parallel prompt","n":3,"response_format":"b64_json"}`))
+	req.Header.Set("Authorization", "Bearer "+server.cfg.App.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 3 {
+		t.Fatalf("len(data) = %d, want 3", len(payload.Data))
+	}
+	if recorder.officialCalls != 3 {
+		t.Fatalf("official client calls = %d, want 3", recorder.officialCalls)
+	}
+	if got := atomic.LoadInt32(&maxActive); got < 2 {
+		t.Fatalf("max concurrent generate calls = %d, want at least 2", got)
+	}
+}
+
+func TestImageGenerationsStaySerialWhenOnlyOneAccountIsAvailable(t *testing.T) {
+	server, recorder := newImageModeCompatTestServerWithOptions(t, imageModeCompatScenario{
+		imageMode:   "studio",
+		accountType: "Free",
+		freeRoute:   "legacy",
+		freeModel:   "auto",
+		paidRoute:   "responses",
+		paidModel:   "gpt-5.4-mini",
+	}, compatTestServerOptions{})
+
+	var active int32
+	var maxActive int32
+	server.officialClientFactory = func(accessToken, proxyURL string, authData map[string]any, requestConfig handler.ImageRequestConfig) imageWorkflowClient {
+		_ = proxyURL
+		_ = authData
+		_ = requestConfig
+		recorder.officialCalls++
+		return &parallelGenerateWorkflowClient{
+			token:     accessToken,
+			active:    &active,
+			maxActive: &maxActive,
+			delay:     120 * time.Millisecond,
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"prompt":"serial prompt","n":3,"response_format":"b64_json"}`))
+	req.Header.Set("Authorization", "Bearer "+server.cfg.App.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 3 {
+		t.Fatalf("len(data) = %d, want 3", len(payload.Data))
+	}
+	if recorder.officialCalls != 3 {
+		t.Fatalf("official client calls = %d, want 3", recorder.officialCalls)
+	}
+	if got := atomic.LoadInt32(&maxActive); got != 1 {
+		t.Fatalf("max concurrent generate calls = %d, want 1 with a single available account", got)
+	}
 }
 
 func TestImageModeCompatibilityBlackBox(t *testing.T) {

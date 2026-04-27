@@ -140,8 +140,8 @@ func TestBuildResponsesImageGenerationToolIncludesSupportedSize(t *testing.T) {
 		t.Fatalf("buildResponsesImageGenerationTool() returned error: %v", err)
 	}
 
-	if got := tool["model"]; got != "gpt-image-2" {
-		t.Fatalf("tool model = %v, want %q", got, "gpt-image-2")
+	if _, ok := tool["model"]; ok {
+		t.Fatalf("tool model = %v, want omitted for gpt-image-2", tool["model"])
 	}
 	if got := tool["action"]; got != "edit" {
 		t.Fatalf("tool action = %v, want %q", got, "edit")
@@ -175,15 +175,31 @@ func TestBuildResponsesImageGenerationToolRejectsUnsupportedSize(t *testing.T) {
 	}
 }
 
+func TestBuildResponsesImageGenerationToolPreservesExplicitCodexModel(t *testing.T) {
+	tool, err := buildResponsesImageGenerationToolWithOptions(responsesImageToolOptions{
+		RequestedModel: "gpt-5.4-mini",
+		Action:         "generate",
+		Size:           "1536x1024",
+	})
+	if err != nil {
+		t.Fatalf("buildResponsesImageGenerationTool() returned error: %v", err)
+	}
+	if got := tool["model"]; got != "gpt-5.4-mini" {
+		t.Fatalf("tool model = %v, want %q", got, "gpt-5.4-mini")
+	}
+}
+
 func TestNormalizeResponsesImageToolModel(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
 		want  string
 	}{
-		{name: "gpt image 1 stays gpt image 1", input: "gpt-image-1", want: "gpt-image-1"},
-		{name: "gpt image 2 stays gpt image 2", input: "gpt-image-2", want: "gpt-image-2"},
-		{name: "other values fall back to gpt image 2", input: "gpt-5.4-mini", want: "gpt-image-2"},
+		{name: "gpt image 1 is omitted", input: "gpt-image-1", want: ""},
+		{name: "gpt image 2 is omitted", input: "gpt-image-2", want: ""},
+		{name: "auto is omitted", input: "auto", want: ""},
+		{name: "gpt 5 4 mini is preserved", input: "gpt-5.4-mini", want: "gpt-5.4-mini"},
+		{name: "unknown values are omitted", input: "unknown-model", want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

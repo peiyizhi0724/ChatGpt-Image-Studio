@@ -27,6 +27,7 @@ type configPayload struct {
 		MaxImageConcurrency      int    `json:"maxImageConcurrency"`
 		ImageQueueLimit          int    `json:"imageQueueLimit"`
 		ImageQueueTimeoutSeconds int    `json:"imageQueueTimeoutSeconds"`
+		ImageTaskQueueTTLSeconds int    `json:"imageTaskQueueTtlSeconds"`
 	} `json:"server"`
 	ChatGPT struct {
 		Model                            string `json:"model"`
@@ -163,12 +164,13 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			"max_upload_size_mb": payload.App.MaxUploadSizeMB,
 		},
 		"server": {
-			"host":                        payload.Server.Host,
-			"port":                        payload.Server.Port,
-			"static_dir":                  payload.Server.StaticDir,
-			"max_image_concurrency":       payload.Server.MaxImageConcurrency,
-			"image_queue_limit":           payload.Server.ImageQueueLimit,
-			"image_queue_timeout_seconds": payload.Server.ImageQueueTimeoutSeconds,
+			"host":                         payload.Server.Host,
+			"port":                         payload.Server.Port,
+			"static_dir":                   payload.Server.StaticDir,
+			"max_image_concurrency":        payload.Server.MaxImageConcurrency,
+			"image_queue_limit":            payload.Server.ImageQueueLimit,
+			"image_queue_timeout_seconds":  payload.Server.ImageQueueTimeoutSeconds,
+			"image_task_queue_ttl_seconds": payload.Server.ImageTaskQueueTTLSeconds,
 		},
 		"chatgpt": {
 			"model":                                payload.ChatGPT.Model,
@@ -311,6 +313,7 @@ func (s *Server) buildConfigPayloadFromConfig(cfg *config.Config) configPayload 
 	payload.Server.MaxImageConcurrency = cfg.Server.MaxImageConcurrency
 	payload.Server.ImageQueueLimit = cfg.Server.ImageQueueLimit
 	payload.Server.ImageQueueTimeoutSeconds = cfg.Server.ImageQueueTimeoutSeconds
+	payload.Server.ImageTaskQueueTTLSeconds = cfg.Server.ImageTaskQueueTTLSeconds
 
 	payload.ChatGPT.Model = cfg.ChatGPT.Model
 	payload.ChatGPT.SSETimeout = cfg.ChatGPT.SSETimeout

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link2, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -27,22 +27,33 @@ const imageRouteOptions = [
   { label: "responses", value: "responses" },
 ];
 
-const freeImageModelOptions = [
-  { label: "auto（默认）", value: "auto" },
-  { label: "gpt-image-2", value: "gpt-image-2" },
+const responsesCompatibleImageModelOptions = [
   { label: "gpt-5.4-mini", value: "gpt-5.4-mini" },
   { label: "gpt-5.4", value: "gpt-5.4" },
   { label: "gpt-5.5", value: "gpt-5.5" },
   { label: "gpt-5-5-thinking", value: "gpt-5-5-thinking" },
 ];
 
-const paidImageModelOptions = [
+const freeLegacyImageModelOptions = [
+  { label: "auto（默认）", value: "auto" },
+  { label: "gpt-image-2", value: "gpt-image-2" },
+  ...responsesCompatibleImageModelOptions,
+];
+
+const freeResponsesImageModelOptions = [
+  { label: "auto（默认）", value: "auto" },
+  ...responsesCompatibleImageModelOptions,
+];
+
+const paidLegacyImageModelOptions = [
   { label: "gpt-5.4-mini（默认）", value: "gpt-5.4-mini" },
   { label: "gpt-5.4", value: "gpt-5.4" },
   { label: "gpt-5.5", value: "gpt-5.5" },
   { label: "gpt-5-5-thinking", value: "gpt-5-5-thinking" },
   { label: "gpt-image-2", value: "gpt-image-2" },
 ];
+
+const paidResponsesImageModelOptions = paidLegacyImageModelOptions.filter((item) => item.value !== "gpt-image-2");
 
 const cpaRouteStrategyOptions: Array<{
   label: string;
@@ -54,12 +65,24 @@ const cpaRouteStrategyOptions: Array<{
   { label: "auto", value: "auto", hint: "先走 /v1/images/*，命中特定已知错误时再回退到 codex responses。" },
 ];
 
-function withCurrentOption(options: Array<{ label: string; value: string }>, value: string) {
+function getFreeImageModelOptions(route: string) {
+  return route === "responses" ? freeResponsesImageModelOptions : freeLegacyImageModelOptions;
+}
+
+function getPaidImageModelOptions(route: string) {
+  return route === "responses" ? paidResponsesImageModelOptions : paidLegacyImageModelOptions;
+}
+
+function normalizeImageRouteModel(
+  value: string,
+  options: Array<{ label: string; value: string }>,
+  fallback: string,
+) {
   const normalizedValue = String(value || "").trim();
-  if (!normalizedValue || options.some((item) => item.value === normalizedValue)) {
-    return options;
+  if (options.some((item) => item.value === normalizedValue)) {
+    return normalizedValue;
   }
-  return [{ label: `${normalizedValue}（当前值）`, value: normalizedValue }, ...options];
+  return fallback;
 }
 
 type ImageModeSectionProps = {
@@ -80,8 +103,39 @@ export function ImageModeSection({
   setSection,
 }: ImageModeSectionProps) {
   const [isTestingCPA, setIsTestingCPA] = useState(false);
-  const freeModelSelectOptions = withCurrentOption(freeImageModelOptions, config.chatgpt.freeImageModel);
-  const paidModelSelectOptions = withCurrentOption(paidImageModelOptions, config.chatgpt.paidImageModel);
+  const freeModelSelectOptions = getFreeImageModelOptions(config.chatgpt.freeImageRoute);
+  const paidModelSelectOptions = getPaidImageModelOptions(config.chatgpt.paidImageRoute);
+  const normalizedFreeImageModel = normalizeImageRouteModel(
+    config.chatgpt.freeImageModel,
+    freeModelSelectOptions,
+    "auto",
+  );
+  const normalizedPaidImageModel = normalizeImageRouteModel(
+    config.chatgpt.paidImageModel,
+    paidModelSelectOptions,
+    "gpt-5.4-mini",
+  );
+
+  useEffect(() => {
+    if (
+      normalizedFreeImageModel === config.chatgpt.freeImageModel &&
+      normalizedPaidImageModel === config.chatgpt.paidImageModel
+    ) {
+      return;
+    }
+    setSection("chatgpt", {
+      ...config.chatgpt,
+      freeImageModel: normalizedFreeImageModel,
+      paidImageModel: normalizedPaidImageModel,
+    });
+  }, [
+    config.chatgpt,
+    config.chatgpt.freeImageModel,
+    config.chatgpt.paidImageModel,
+    normalizedFreeImageModel,
+    normalizedPaidImageModel,
+    setSection,
+  ]);
 
   const buildIntegrationToastMessage = (result: IntegrationTestResult) => {
     const segments = [result.message];
@@ -250,7 +304,17 @@ export function ImageModeSection({
           >
             <Select
               value={config.chatgpt.freeImageRoute}
-              onValueChange={(value) => setSection("chatgpt", { ...config.chatgpt, freeImageRoute: value })}
+              onValueChange={(value) =>
+                setSection("chatgpt", {
+                  ...config.chatgpt,
+                  freeImageRoute: value,
+                  freeImageModel: normalizeImageRouteModel(
+                    config.chatgpt.freeImageModel,
+                    getFreeImageModelOptions(value),
+                    "auto",
+                  ),
+                })
+              }
             >
               <SelectTrigger className="h-11 rounded-2xl border-stone-200 bg-white shadow-none focus-visible:ring-0">
                 <SelectValue />
@@ -268,15 +332,20 @@ export function ImageModeSection({
         {isStudioMode ? (
           <Field
             label="Free 模型"
-            hint="Studio 模式下 Free 账号真正发给官方的模型。"
+            hint={
+              config.chatgpt.freeImageRoute === "responses"
+                ? "Free 走 responses 时只保留 auto 与 gpt-5.* 兼容模型；gpt-image-2 已移除，避免误选。"
+                : "Studio 模式下 Free 账号真正发给官方的模型。legacy 路由仍可选 gpt-image-2。"
+            }
             tooltip={
               <TooltipDetails
                 items={[
                   {
-                    title: "可选值",
+                    title: "路由绑定",
                     body: (
                       <>
-                        <code>auto</code>、<code>gpt-image-2</code>、<code>gpt-5.4-mini</code>、<code>gpt-5.4</code>、<code>gpt-5.5</code>、<code>gpt-5-5-thinking</code>。
+                        <code>legacy</code> 可选 <code>auto</code>、<code>gpt-image-2</code> 和 <code>gpt-5.*</code>；
+                        <code>responses</code> 只保留 <code>auto</code> 与 <code>gpt-5.*</code> 兼容模型。
                       </>
                     ),
                   },
@@ -293,7 +362,7 @@ export function ImageModeSection({
             }
           >
             <Select
-              value={config.chatgpt.freeImageModel}
+              value={normalizedFreeImageModel}
               onValueChange={(value) => setSection("chatgpt", { ...config.chatgpt, freeImageModel: value })}
             >
               <SelectTrigger className="h-11 rounded-2xl border-stone-200 bg-white shadow-none focus-visible:ring-0">
@@ -362,7 +431,17 @@ export function ImageModeSection({
           >
             <Select
               value={config.chatgpt.paidImageRoute}
-              onValueChange={(value) => setSection("chatgpt", { ...config.chatgpt, paidImageRoute: value })}
+              onValueChange={(value) =>
+                setSection("chatgpt", {
+                  ...config.chatgpt,
+                  paidImageRoute: value,
+                  paidImageModel: normalizeImageRouteModel(
+                    config.chatgpt.paidImageModel,
+                    getPaidImageModelOptions(value),
+                    "gpt-5.4-mini",
+                  ),
+                })
+              }
             >
               <SelectTrigger className="h-11 rounded-2xl border-stone-200 bg-white shadow-none focus-visible:ring-0">
                 <SelectValue />
@@ -380,15 +459,20 @@ export function ImageModeSection({
         {isStudioMode ? (
           <Field
             label="Paid 模型"
-            hint="Studio 模式下 Paid 账号真正发给官方的模型，例如 gpt-5.4-mini 或 gpt-5.4。"
+            hint={
+              config.chatgpt.paidImageRoute === "responses"
+                ? "Paid 走 responses 时只保留 gpt-5.* 兼容模型；gpt-image-2 已移除，避免触发不兼容请求。"
+                : "Studio 模式下 Paid 账号真正发给官方的模型。legacy 路由可继续使用 gpt-image-2 或 gpt-5.*。"
+            }
             tooltip={
               <TooltipDetails
                 items={[
                   {
-                    title: "常见值",
+                    title: "路由绑定",
                     body: (
                       <>
-                        <code>gpt-5.4-mini</code>、<code>gpt-5.4</code>、<code>gpt-5.5</code>、<code>gpt-5-5-thinking</code>。
+                        <code>responses</code> 路由只允许 <code>gpt-5.4-mini</code>、<code>gpt-5.4</code>、
+                        <code>gpt-5.5</code>、<code>gpt-5-5-thinking</code>；<code>gpt-image-2</code> 已禁用。
                       </>
                     ),
                   },
@@ -405,7 +489,7 @@ export function ImageModeSection({
             }
           >
             <Select
-              value={config.chatgpt.paidImageModel}
+              value={normalizedPaidImageModel}
               onValueChange={(value) => setSection("chatgpt", { ...config.chatgpt, paidImageModel: value })}
             >
               <SelectTrigger className="h-11 rounded-2xl border-stone-200 bg-white shadow-none focus-visible:ring-0">

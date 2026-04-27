@@ -4,13 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "react-medium-image-zoom/dist/styles.css";
 import { ChevronsDown } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 import { ImageEditModal } from "@/components/image-edit-modal";
 import {
+  cancelImageTask,
+  consumeImageTaskStream,
   fetchAccountQuota,
   fetchAccounts,
   fetchConfig,
+  listImageTasks,
   type Account,
+  type ImageTaskSnapshot,
+  type ImageTaskView,
   type ImageQuality,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -18,19 +24,24 @@ import {
   normalizeConversation,
   saveImageConversation,
   updateImageConversation,
+  type ImageConversationStatus,
   type ImageConversation,
+  type ImageConversationTurn,
   type ImageMode,
   type StoredImage,
 } from "@/store/image-conversations";
-import {
-  isImageTaskActive,
-  listActiveImageTasks,
-  subscribeImageTasks,
-} from "@/store/image-active-tasks";
 import { ConversationTurns } from "./components/conversation-turns";
 import { EmptyState } from "./components/empty-state";
 import { HistorySidebar } from "./components/history-sidebar";
 import { PromptComposer } from "./components/prompt-composer";
+import {
+  buildActiveRequestState,
+  buildEmptyTaskSnapshot,
+  deriveTaskSnapshotFromItems,
+  type ActiveRequestState,
+  reduceTaskItems,
+  selectConversationActiveTask,
+} from "./task-runtime";
 import { WorkspaceHeader } from "./components/workspace-header";
 import { useImageHistory } from "./hooks/use-image-history";
 import { useImageSourceInputs } from "./hooks/use-image-source-inputs";
@@ -185,14 +196,6 @@ const inspirationExamples: Array<{
   },
 ];
 
-type ActiveRequestState = {
-  conversationId: string;
-  turnId: string;
-  mode: ImageMode;
-  count: number;
-  variant: "standard" | "selection-edit";
-};
-
 function formatConversationTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -233,26 +236,19 @@ function mergeImageGenLimit(
   remaining: number | null | undefined,
   resetAfter: string | null | undefined,
 ) {
-  const next = Array.isArray(limitsProgress) ? [...limitsProgress] : [];
-  const currentIndex = next.findIndex(
-    (item) => item.feature_name === "image_gen",
-  );
+  const existing = limitsProgress ?? [];
   const nextItem = {
     feature_name: "image_gen",
     remaining: typeof remaining === "number" ? remaining : undefined,
     reset_after: resetAfter || undefined,
   };
 
-  if (currentIndex >= 0) {
-    next[currentIndex] = {
-      ...next[currentIndex],
-      ...nextItem,
-    };
-    return next;
+  if (!existing.some((item) => item.feature_name === "image_gen")) {
+    return [...existing, nextItem];
   }
-
-  next.push(nextItem);
-  return next;
+  return existing.map((item) =>
+    item.feature_name === "image_gen" ? { ...item, ...nextItem } : item,
+  );
 }
 
 function applyQuotaResultToAccount(
@@ -315,55 +311,7 @@ function hasUsableFreeLegacyAccount(
 }
 
 async function normalizeConversationHistory(items: ImageConversation[]) {
-  const normalized = items.map((item) => {
-    let changed = false;
-    const turns = (item.turns ?? []).map((turn) => {
-      if (turn.status !== "generating" || isImageTaskActive(item.id, turn.id)) {
-        return turn;
-      }
-
-      changed = true;
-      const errorMessage = turn.images.some(
-        (image) => image.status === "success",
-      )
-        ? turn.error || "任务已中断"
-        : "页面已刷新，任务已中断";
-
-      return {
-        ...turn,
-        status: "error" as const,
-        error: errorMessage,
-        images: turn.images.map((image) =>
-          image.status === "loading"
-            ? {
-                ...image,
-                status: "error" as const,
-                error: "页面已刷新，任务已中断",
-              }
-            : image,
-        ),
-      };
-    });
-
-    const conversation = normalizeConversation(
-      changed
-        ? {
-            ...item,
-            turns,
-          }
-        : item,
-    );
-
-    return { conversation, changed };
-  });
-
-  await Promise.all(
-    normalized
-      .filter((item) => item.changed)
-      .map((item) => saveImageConversation(item.conversation)),
-  );
-
-  return normalized.map((item) => item.conversation);
+  return items.map((item) => normalizeConversation(item));
 }
 
 function makeId() {
@@ -384,6 +332,170 @@ function formatProcessingDuration(totalSeconds: number) {
 
 function buildWaitingDots(totalSeconds: number) {
   return ".".repeat((totalSeconds % 3) + 1);
+}
+
+function mapTaskStatusToTurnStatus(status: string): ImageConversationStatus {
+  switch (status) {
+    case "queued":
+      return "queued";
+    case "running":
+    case "cancel_requested":
+      return "running";
+    case "cancelled":
+      return "cancelled";
+    case "failed":
+    case "expired":
+      return "error";
+    case "succeeded":
+      return "success";
+    default:
+      return "success";
+  }
+}
+
+function mapTaskImagesToStoredImages(images: ImageTaskView["images"]): StoredImage[] {
+  return images.map((image, index) => ({
+    id: image.file_id || image.gen_id || `task-image-${index}`,
+    status:
+      image.error && !image.b64_json && !image.url
+        ? "error"
+        : image.b64_json || image.url
+          ? "success"
+          : "loading",
+    b64_json: image.b64_json,
+    url: image.url,
+    revised_prompt: image.revised_prompt,
+    file_id: image.file_id,
+    gen_id: image.gen_id,
+    conversation_id: image.conversation_id,
+    parent_message_id: image.parent_message_id,
+    source_account_id: image.source_account_id,
+    error: image.error,
+  }));
+}
+
+function mergeRetryImageResult(
+  currentImages: StoredImage[],
+  taskImages: StoredImage[],
+  retryImageIndex: number,
+) {
+  if (retryImageIndex < 0) {
+    return currentImages;
+  }
+  return currentImages.map((image, index) =>
+    index === retryImageIndex ? (taskImages[0] ?? image) : image,
+  );
+}
+
+function isActiveImageTaskStatus(status: string) {
+  return (
+    status === "queued" ||
+    status === "running" ||
+    status === "cancel_requested"
+  );
+}
+
+function isFinalImageTaskStatus(status: string) {
+  return (
+    status === "succeeded" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "expired"
+  );
+}
+
+function selectPreferredTaskForTurn(
+  turn: ImageConversationTurn,
+  tasks: ImageTaskView[],
+) {
+  if (tasks.length === 0) {
+    return null;
+  }
+  const boundTask = turn.taskId
+    ? tasks.find((candidate) => candidate.id === turn.taskId) ?? null
+    : null;
+  if (boundTask && !isFinalImageTaskStatus(boundTask.status)) {
+    return boundTask;
+  }
+  const latestActiveTask =
+    tasks
+      .filter((candidate) => isActiveImageTaskStatus(candidate.status))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ??
+    null;
+  if (latestActiveTask) {
+    return latestActiveTask;
+  }
+  const latestNonCancelledTask =
+    [...tasks]
+      .filter((candidate) => candidate.status !== "cancelled")
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ??
+    null;
+  if (latestNonCancelledTask) {
+    return latestNonCancelledTask;
+  }
+  if (boundTask) {
+    return boundTask;
+  }
+  return tasks[tasks.length - 1] ?? null;
+}
+
+function deriveTurnStatusFromImages(
+  images: StoredImage[],
+  taskStatus: string,
+): ImageConversationStatus {
+  if (images.some((image) => image.status === "loading")) {
+    return taskStatus === "queued" ? "queued" : "running";
+  }
+  if (images.some((image) => image.status === "error")) {
+    return "error";
+  }
+  if (images.length > 0 && images.every((image) => image.status === "success")) {
+    return "success";
+  }
+  return mapTaskStatusToTurnStatus(taskStatus);
+}
+
+function applyTaskViewToConversation(
+  conversation: ImageConversation,
+  tasksByTurnKey: Map<string, ImageTaskView[]>,
+) {
+  const turns = (conversation.turns ?? []).map((turn) => {
+    const tasks = tasksByTurnKey.get(`${conversation.id}:${turn.id}`) ?? [];
+    const task = selectPreferredTaskForTurn(turn, tasks);
+    if (!task) {
+      return turn;
+    }
+    const mappedTaskImages =
+      task.images.length > 0 ? mapTaskImagesToStoredImages(task.images) : [];
+    const mergedImages =
+      typeof task.retryImageIndex === "number"
+        ? mergeRetryImageResult(turn.images, mappedTaskImages, task.retryImageIndex)
+        : mappedTaskImages.length > 0
+          ? mappedTaskImages
+          : turn.images;
+    const mergedStatus = deriveTurnStatusFromImages(mergedImages, task.status);
+    const mergedError =
+      mergedStatus === "error"
+        ? task.error || turn.error
+        : undefined;
+    return {
+      ...turn,
+      taskId: task.id,
+      status: mergedStatus,
+      queuePosition: task.queuePosition,
+      waitingReason: task.waitingReason,
+      waitingDetail: task.blockers?.[0]?.detail,
+      startedAt: task.startedAt,
+      finishedAt: task.finishedAt,
+      cancelRequested: task.cancelRequested,
+      error: mergedError,
+      images: mergedImages,
+    };
+  });
+  return normalizeConversation({
+    ...conversation,
+    turns,
+  });
 }
 
 function buildProcessingStatus(
@@ -407,7 +519,7 @@ function buildProcessingStatus(
     }
     return {
       title: "模型正在生成图片",
-      detail: "通常需要 20 到 90 秒，请保持页面开启",
+      detail: "通常需要 1 到 5 分钟，请保持页面开启",
     };
   }
 
@@ -435,13 +547,13 @@ function buildProcessingStatus(
         variant === "selection-edit"
           ? "模型正在按选区修改图片"
           : "模型正在编辑图片",
-      detail: "通常需要 20 到 90 秒，请保持页面开启",
+      detail: "通常需要 1 到 5 分钟，请保持页面开启",
     };
   }
 
   return {
     title: "模型正在编辑图片",
-    detail: "通常需要 20 到 90 秒，请保持页面开启",
+    detail: "通常需要 1 到 5 分钟，请保持页面开启",
   };
 }
 
@@ -474,7 +586,6 @@ export default function ImagePage() {
       ? window.matchMedia("(min-width: 1024px)").matches
       : false,
   );
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableQuota, setAvailableQuota] = useState("加载中");
   const [availableAccounts, setAvailableAccounts] = useState<Account[]>([]);
   const [allowDisabledStudioAccounts, setAllowDisabledStudioAccounts] =
@@ -484,46 +595,54 @@ export default function ImagePage() {
   >("studio");
   const [configuredFreeImageRoute, setConfiguredFreeImageRoute] =
     useState("legacy");
-  const [activeRequest, setActiveRequest] = useState<ActiveRequestState | null>(
-    null,
-  );
-  const [submitStartedAt, setSubmitStartedAt] = useState<number | null>(null);
   const [submitElapsedSeconds, setSubmitElapsedSeconds] = useState(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isMobileComposerCollapsed, setIsMobileComposerCollapsed] =
     useState(true);
-
-  const syncRuntimeTaskState = useCallback(
-    (preferredConversationId?: string | null) => {
-      const tasks = listActiveImageTasks();
-      const nextTask =
-        tasks.find(
-          (task) =>
-            preferredConversationId &&
-            task.conversationId === preferredConversationId,
-        ) ??
-        tasks[0] ??
-        null;
-
-      setIsSubmitting(tasks.length > 0);
-      setActiveRequest(
-        nextTask
-          ? {
-              conversationId: nextTask.conversationId,
-              turnId: nextTask.turnId,
-              mode: nextTask.mode,
-              count: nextTask.count,
-              variant: nextTask.variant,
-            }
-          : null,
-      );
-      setSubmitStartedAt(nextTask?.startedAt ?? null);
-      if (!nextTask) {
-        setSubmitElapsedSeconds(0);
-      }
-    },
-    [],
+  const [taskItems, setTaskItems] = useState<ImageTaskView[]>([]);
+  const [cancellingTaskIds, setCancellingTaskIds] = useState<string[]>([]);
+  const [taskSnapshot, setTaskSnapshot] = useState<ImageTaskSnapshot>(
+    buildEmptyTaskSnapshot(),
   );
+  const persistedTaskStatesRef = useRef<Record<string, string>>({});
+  const cancellingTaskIdsRef = useRef(new Set<string>());
+  const quotaSyncedTaskIdsRef = useRef(new Set<string>());
+
+  const activeTasks = useMemo(
+    () =>
+      taskItems.filter((task) =>
+        ["queued", "running", "cancel_requested"].includes(task.status),
+      ),
+    [taskItems],
+  );
+  const activeTaskByTurnKey = useMemo(() => {
+    const next = new Map<string, ImageTaskView>();
+    for (const task of activeTasks) {
+      const key = `${task.conversationId}:${task.turnId}`;
+      const current = next.get(key);
+      if (!current || current.createdAt.localeCompare(task.createdAt) < 0) {
+        next.set(key, task);
+      }
+    }
+    return next;
+  }, [activeTasks]);
+  const activeTaskById = useMemo(() => {
+    const next = new Map<string, ImageTaskView>();
+    for (const task of activeTasks) {
+      next.set(task.id, task);
+    }
+    return next;
+  }, [activeTasks]);
+  const displayTaskSnapshot = useMemo(
+    () => deriveTaskSnapshotFromItems(taskItems, taskSnapshot),
+    [taskItems, taskSnapshot],
+  );
+  const activeConversationIds = useMemo(
+    () => new Set(activeTasks.map((task) => task.conversationId)),
+    [activeTasks],
+  );
+  const preferredActiveConversationId = activeTasks[0]?.conversationId ?? null;
+  const hasActiveTasks = activeTasks.length > 0;
 
   const {
     conversations,
@@ -541,7 +660,8 @@ export default function ImagePage() {
     normalizeHistory: normalizeConversationHistory,
     mountedRef,
     draftSelectionRef,
-    syncRuntimeTaskState,
+    activeConversationIds,
+    preferredActiveConversationId,
   });
   const {
     sourceImages,
@@ -556,18 +676,45 @@ export default function ImagePage() {
     closeSelectionEditor,
   } = useImageSourceInputs({
     mode,
-    isSubmitting,
     selectedConversationId,
     setMode,
     focusConversation,
     textareaRef,
     makeId,
   });
+  const selectedConversationActiveTaskByTurnId = useMemo(() => {
+    const next = new Map<string, ImageTaskView>();
+    if (!selectedConversationId) {
+      return next;
+    }
+    for (const [key, task] of activeTaskByTurnKey.entries()) {
+      const prefix = `${selectedConversationId}:`;
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+      next.set(task.turnId, task);
+    }
+    return next;
+  }, [activeTaskByTurnKey, selectedConversationId]);
 
+  const displayedConversations = useMemo(() => {
+    const tasksByTurnKey = new Map<string, ImageTaskView[]>();
+    taskItems.forEach((task) => {
+      const key = `${task.conversationId}:${task.turnId}`;
+      const current = tasksByTurnKey.get(key) ?? [];
+      current.push(task);
+      current.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      tasksByTurnKey.set(key, current);
+    });
+    return conversations.map((conversation) =>
+      applyTaskViewToConversation(conversation, tasksByTurnKey),
+    );
+  }, [conversations, taskItems]);
   const selectedConversation = useMemo(
     () =>
-      conversations.find((item) => item.id === selectedConversationId) ?? null,
-    [conversations, selectedConversationId],
+      displayedConversations.find((item) => item.id === selectedConversationId) ??
+      null,
+    [displayedConversations, selectedConversationId],
   );
   const currentImageView = useMemo<"history" | "workspace">(
     () => (pathname.endsWith("/workspace") ? "workspace" : "history"),
@@ -598,6 +745,22 @@ export default function ImagePage() {
       .join("|");
     return `${selectedConversationLastTurn.id}:${selectedConversationLastTurn.status}:${imageKey}`;
   }, [selectedConversationLastTurn]);
+  const activeRequestTask = useMemo(
+    () => selectConversationActiveTask(activeTasks, selectedConversationId),
+    [activeTasks, selectedConversationId],
+  );
+  const activeRequest = useMemo<ActiveRequestState | null>(
+    () => buildActiveRequestState(activeRequestTask),
+    [activeRequestTask],
+  );
+  const activeRequestStartedAt = useMemo(() => {
+    const raw = activeRequestTask?.startedAt || activeRequestTask?.createdAt;
+    if (!raw) {
+      return null;
+    }
+    const timestamp = new Date(raw).getTime();
+    return Number.isNaN(timestamp) ? null : timestamp;
+  }, [activeRequestTask]);
   const parsedCount = useMemo(
     () => Math.max(1, Math.min(8, Number(imageCount) || 1)),
     [imageCount],
@@ -725,9 +888,6 @@ export default function ImagePage() {
     () => mode === "generate" && imageSources.length > 0,
     [imageSources, mode],
   );
-  const activeConversationIds = new Set(
-    listActiveImageTasks().map((task) => task.conversationId),
-  );
   const processingStatus = useMemo(
     () =>
       activeRequest
@@ -743,40 +903,6 @@ export default function ImagePage() {
   const waitingDots = useMemo(
     () => buildWaitingDots(submitElapsedSeconds),
     [submitElapsedSeconds],
-  );
-  const syncQuotaAfterResult = useCallback(
-    (images: StoredImage[]) => {
-      const sourceAccountID =
-        images.find(
-          (item) => item.status === "success" && item.source_account_id,
-        )?.source_account_id ??
-        images.find((item) => item.source_account_id)?.source_account_id;
-      if (!sourceAccountID) {
-        return;
-      }
-
-      void (async () => {
-        try {
-          const quota = await fetchAccountQuota(sourceAccountID, {
-            refresh: false,
-          });
-          setAvailableAccounts((prev) => {
-            const next = prev.map((account) =>
-              account.id === sourceAccountID
-                ? applyQuotaResultToAccount(account, quota)
-                : account,
-            );
-            setAvailableQuota(
-              formatAvailableQuota(next, allowDisabledStudioAccounts),
-            );
-            return next;
-          });
-        } catch {
-          // Best-effort UI sync only; keep the current snapshot when it fails.
-        }
-      })();
-    },
-    [allowDisabledStudioAccounts],
   );
 
   useEffect(() => {
@@ -807,7 +933,6 @@ export default function ImagePage() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       void refreshHistory({ normalize: true, withLoading: true });
-      syncRuntimeTaskState(selectedConversationId);
     });
 
     return () => {
@@ -817,21 +942,134 @@ export default function ImagePage() {
   }, []);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      syncRuntimeTaskState(selectedConversationId);
-    });
-    const unsubscribe = subscribeImageTasks(() => {
-      void refreshHistory({ silent: true });
-      window.requestAnimationFrame(() => {
-        syncRuntimeTaskState(selectedConversationId);
+    let disposed = false;
+    let reconnectTimer: number | null = null;
+    let pollingTimer: number | null = null;
+    let streamAbort: AbortController | null = null;
+
+    const applyTaskPayload = (items: ImageTaskView[], snapshot: ImageTaskSnapshot) => {
+      if (disposed) {
+        return;
+      }
+      setTaskItems(items);
+      setTaskSnapshot(snapshot);
+    };
+
+    const loadTasks = async () => {
+      try {
+        const payload = await listImageTasks();
+        applyTaskPayload(payload.items, payload.snapshot);
+      } catch {
+        if (!disposed) {
+          setTaskItems([]);
+          setTaskSnapshot(buildEmptyTaskSnapshot());
+        }
+      }
+    };
+
+    const startPolling = () => {
+      if (pollingTimer !== null) {
+        return;
+      }
+      void loadTasks();
+      pollingTimer = window.setInterval(() => {
+        void loadTasks();
+      }, 2000);
+    };
+
+    const stopPolling = () => {
+      if (pollingTimer !== null) {
+        window.clearInterval(pollingTimer);
+        pollingTimer = null;
+      }
+    };
+
+    const startStream = () => {
+      streamAbort = new AbortController();
+      void consumeImageTaskStream(
+        {
+          onInit: ({ items, snapshot }) => {
+            stopPolling();
+            applyTaskPayload(items, snapshot);
+          },
+          onEvent: (event) => {
+            setTaskItems((prev) => reduceTaskItems(prev, event));
+            if (event.snapshot) {
+              setTaskSnapshot(event.snapshot);
+            }
+          },
+        },
+        streamAbort.signal,
+      ).catch(() => {
+        if (disposed) {
+          return;
+        }
+        startPolling();
+        reconnectTimer = window.setTimeout(() => {
+          if (!disposed) {
+            startStream();
+          }
+        }, 3000);
       });
-    });
+    };
+
+    startPolling();
+    startStream();
 
     return () => {
-      window.cancelAnimationFrame(frame);
-      unsubscribe();
+      disposed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      stopPolling();
+      streamAbort?.abort();
     };
-  }, [refreshHistory, selectedConversationId, syncRuntimeTaskState]);
+  }, []);
+
+  useEffect(() => {
+    const completedTasks = taskItems.filter(
+      (task) =>
+        task.status === "succeeded" &&
+        !quotaSyncedTaskIdsRef.current.has(task.id),
+    );
+    if (completedTasks.length === 0) {
+      return;
+    }
+
+    const accountIDs = new Set<string>();
+    for (const task of completedTasks) {
+      quotaSyncedTaskIdsRef.current.add(task.id);
+      for (const image of task.images) {
+        if (image.source_account_id) {
+          accountIDs.add(image.source_account_id);
+        }
+      }
+    }
+    if (accountIDs.size === 0) {
+      return;
+    }
+
+    void (async () => {
+      for (const accountID of accountIDs) {
+        try {
+          const quota = await fetchAccountQuota(accountID, { refresh: false });
+          setAvailableAccounts((prev) => {
+            const next = prev.map((account) =>
+              account.id === accountID
+                ? applyQuotaResultToAccount(account, quota)
+                : account,
+            );
+            setAvailableQuota(
+              formatAvailableQuota(next, allowDisabledStudioAccounts),
+            );
+            return next;
+          });
+        } catch {
+          // Best-effort UI sync only; keep the current snapshot when it fails.
+        }
+      }
+    })();
+  }, [allowDisabledStudioAccounts, taskItems]);
 
   useEffect(() => {
     const loadQuota = async () => {
@@ -986,7 +1224,7 @@ export default function ImagePage() {
     previousTurnCountRef.current = selectedConversationTurns.length;
     previousLastTurnKeyRef.current = selectedConversationLastTurnKey;
 
-    if (!selectedConversation && !isSubmitting) {
+    if (!selectedConversation && !hasActiveTasks) {
       return;
     }
 
@@ -1006,7 +1244,7 @@ export default function ImagePage() {
       window.cancelAnimationFrame(frame);
     };
   }, [
-    isSubmitting,
+    hasActiveTasks,
     scrollToBottom,
     selectedConversation,
     selectedConversationId,
@@ -1032,13 +1270,14 @@ export default function ImagePage() {
   }, [isStandaloneWorkspace, scrollToBottom, selectedConversationId]);
 
   useEffect(() => {
-    if (!isSubmitting || submitStartedAt === null) {
+    if (activeRequestStartedAt === null) {
+      setSubmitElapsedSeconds(0);
       return;
     }
 
     const updateElapsed = () => {
       setSubmitElapsedSeconds(
-        Math.max(0, Math.floor((Date.now() - submitStartedAt) / 1000)),
+        Math.max(0, Math.floor((Date.now() - activeRequestStartedAt) / 1000)),
       );
     };
 
@@ -1047,7 +1286,7 @@ export default function ImagePage() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [isSubmitting, submitStartedAt]);
+  }, [activeRequestStartedAt]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -1074,22 +1313,20 @@ export default function ImagePage() {
   const persistConversation = useCallback(
     async (conversation: ImageConversation) => {
       const normalizedConversation = normalizeConversation(conversation);
-      await saveImageConversation(normalizedConversation);
-      if (!mountedRef.current) {
-        return;
+      if (mountedRef.current) {
+        draftSelectionRef.current = false;
+        setSelectedConversationId(normalizedConversation.id);
+        setConversations((prev) => {
+          const next = [
+            normalizedConversation,
+            ...prev.filter((item) => item.id !== normalizedConversation.id),
+          ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+          return next;
+        });
       }
-      draftSelectionRef.current = false;
-      setSelectedConversationId(normalizedConversation.id);
-      setConversations((prev) => {
-        const next = [
-          normalizedConversation,
-          ...prev.filter((item) => item.id !== normalizedConversation.id),
-        ];
-        return next.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      });
-      syncRuntimeTaskState(normalizedConversation.id);
+      await saveImageConversation(normalizedConversation);
     },
-    [setConversations, setSelectedConversationId, syncRuntimeTaskState],
+    [setConversations, setSelectedConversationId],
   );
 
   const updateConversation = useCallback(
@@ -1097,6 +1334,21 @@ export default function ImagePage() {
       conversationId: string,
       updater: (current: ImageConversation | null) => ImageConversation,
     ) => {
+      if (mountedRef.current) {
+        setConversations((prev) => {
+          const currentConversation =
+            prev.find((item) => item.id === conversationId) ?? null;
+          const optimisticConversation = normalizeConversation(
+            updater(currentConversation),
+          );
+          const next = [
+            optimisticConversation,
+            ...prev.filter((item) => item.id !== conversationId),
+          ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+          return next;
+        });
+      }
+
       const nextConversation = await updateImageConversation(
         conversationId,
         updater,
@@ -1108,12 +1360,50 @@ export default function ImagePage() {
         const next = [
           nextConversation,
           ...prev.filter((item) => item.id !== conversationId),
-        ];
-        return next.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        return next;
       });
     },
     [setConversations],
   );
+
+  useEffect(() => {
+    for (const task of taskItems) {
+      if (!["succeeded", "failed", "cancelled", "expired"].includes(task.status)) {
+        continue;
+      }
+      if (!task.conversationId.trim()) {
+        continue;
+      }
+      if (!displayedConversations.some((item) => item.id === task.conversationId)) {
+        continue;
+      }
+      if (persistedTaskStatesRef.current[task.id] === task.status) {
+        continue;
+      }
+      persistedTaskStatesRef.current[task.id] = task.status;
+      void updateConversation(task.conversationId, (current) => {
+        if (!current) {
+          return normalizeConversation({
+            id: task.conversationId,
+            title: "",
+            mode: "generate",
+            prompt: "",
+            model: "gpt-image-2",
+            count: task.count,
+            images: [],
+            createdAt: task.createdAt,
+            status: "error",
+            turns: [],
+          } as ImageConversation);
+        }
+        return applyTaskViewToConversation(
+          current,
+          new Map([[`${task.conversationId}:${task.turnId}`, [task]]]),
+        );
+      });
+    }
+  }, [displayedConversations, taskItems, updateConversation]);
 
   const resetComposer = useCallback(
     (nextMode: ImageMode = mode) => {
@@ -1171,28 +1461,67 @@ export default function ImagePage() {
       imageQuality,
       selectedConversationId,
       editorTarget,
-      isSubmitting,
       makeId,
       focusConversation,
       closeSelectionEditor,
       setImagePrompt,
       setSourceImages,
-      setIsSubmitting,
-      setActiveRequest,
       setSubmitElapsedSeconds,
-      setSubmitStartedAt,
       persistConversation,
-      syncQuotaAfterResult,
       updateConversation,
       resetComposer,
     });
 
+  const handleCancelTurn = useCallback(
+    async (conversationId: string, turn: ImageConversationTurn) => {
+      const runtimeTask =
+        activeTaskByTurnKey.get(`${conversationId}:${turn.id}`) ??
+        (turn.taskId ? activeTaskById.get(turn.taskId.trim()) : null) ??
+        null;
+      const taskId = runtimeTask?.id || "";
+      if (!taskId) {
+        toast.warning("任务还在创建中，请稍后再试");
+        return;
+      }
+      if (cancellingTaskIdsRef.current.has(taskId)) {
+        return;
+      }
+
+      cancellingTaskIdsRef.current.add(taskId);
+      setCancellingTaskIds((prev) =>
+        prev.includes(taskId) ? prev : [...prev, taskId],
+      );
+
+      try {
+        const result = await cancelImageTask(taskId);
+        setTaskItems((prev) =>
+          reduceTaskItems(prev, {
+            type: "task.upsert",
+            task: result.task,
+          }),
+        );
+        setTaskSnapshot(result.snapshot);
+        toast.success(
+          result.task.status === "cancel_requested"
+            ? "已提交取消请求，等待当前执行结束"
+            : "已取消排队任务",
+        );
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "取消任务失败");
+      } finally {
+        cancellingTaskIdsRef.current.delete(taskId);
+        setCancellingTaskIds((prev) => prev.filter((item) => item !== taskId));
+      }
+    },
+    [activeTaskById, activeTaskByTurnKey],
+  );
+
   const historyPanel = (
     <HistorySidebar
-      conversations={conversations}
+      conversations={displayedConversations}
       selectedConversationId={selectedConversationId}
       isLoadingHistory={isLoadingHistory}
-      hasActiveTasks={isSubmitting}
+      hasActiveTasks={hasActiveTasks}
       activeConversationIds={activeConversationIds}
       modeLabelMap={modeLabelMap}
       buildConversationPreviewSource={buildConversationPreviewSource}
@@ -1214,13 +1543,19 @@ export default function ImagePage() {
           : "rounded-[30px] border border-stone-200 bg-white shadow-[0_14px_40px_rgba(15,23,42,0.05)]",
       )}
     >
-      {!isStandaloneWorkspace ? (
-        <WorkspaceHeader
-          historyCollapsed={historyCollapsed}
-          selectedConversationTitle={selectedConversation?.title}
-          onToggleHistory={() => setHistoryCollapsed((current) => !current)}
-        />
-      ) : null}
+      <WorkspaceHeader
+        historyCollapsed={historyCollapsed}
+        selectedConversationTitle={selectedConversation?.title}
+        runningCount={displayTaskSnapshot.running}
+        maxRunningCount={displayTaskSnapshot.maxRunning}
+        queuedCount={displayTaskSnapshot.queued}
+        workspaceActiveCount={displayTaskSnapshot.activeSources.workspace}
+        compatActiveCount={displayTaskSnapshot.activeSources.compat}
+        cancelledCount={displayTaskSnapshot.finalStatuses.cancelled}
+        expiredCount={displayTaskSnapshot.finalStatuses.expired}
+        onToggleHistory={() => setHistoryCollapsed((current) => !current)}
+        showHistoryToggle={!isStandaloneWorkspace}
+      />
 
       <div
         className={cn(
@@ -1248,7 +1583,8 @@ export default function ImagePage() {
               turns={selectedConversationTurns}
               modeLabelMap={modeLabelMap}
               activeRequest={activeRequest}
-              isSubmitting={isSubmitting}
+              activeTaskByTurnId={selectedConversationActiveTaskByTurnId}
+              cancellingTaskIds={cancellingTaskIds}
               processingStatus={processingStatus}
               waitingDots={waitingDots}
               submitElapsedSeconds={submitElapsedSeconds}
@@ -1257,6 +1593,7 @@ export default function ImagePage() {
               onOpenSelectionEditor={openSelectionEditor}
               onSeedFromResult={seedFromResult}
               onRetryTurn={handleRetryTurn}
+              onCancelTurn={handleCancelTurn}
             />
           )}
         </div>
@@ -1296,7 +1633,6 @@ export default function ImagePage() {
         availableQuota={availableQuota}
         sourceImages={sourceImages}
         imagePrompt={imagePrompt}
-        isSubmitting={isSubmitting}
         textareaRef={textareaRef}
         uploadInputRef={uploadInputRef}
         maskInputRef={maskInputRef}
@@ -1345,12 +1681,8 @@ export default function ImagePage() {
         open={Boolean(editorTarget)}
         imageName={editorTarget?.imageName || "image.png"}
         imageSrc={editorTarget?.sourceDataUrl || ""}
-        isSubmitting={isSubmitting}
-        onClose={() => {
-          if (!isSubmitting) {
-            closeSelectionEditor();
-          }
-        }}
+        isSubmitting={false}
+        onClose={closeSelectionEditor}
         onSubmit={handleSelectionEditSubmit}
       />
     </section>

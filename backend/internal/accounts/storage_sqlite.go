@@ -187,3 +187,28 @@ func (s *sqliteAccountStorage) EnsureSyncStateInitialized(auths []LocalAuth) err
 	_, err = s.db.Exec(`INSERT INTO metadata(key, value) VALUES('sync_bootstrap', '1') ON CONFLICT(key) DO UPDATE SET value = '1'`)
 	return err
 }
+
+func (s *sqliteAccountStorage) LoadImageRoutingPolicy() (*ImageAccountRoutingPolicy, error) {
+	var raw []byte
+	err := s.db.QueryRow(`SELECT value FROM metadata WHERE key = 'image_account_policy'`).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var policy ImageAccountRoutingPolicy
+	if err := json.Unmarshal(raw, &policy); err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+func (s *sqliteAccountStorage) SaveImageRoutingPolicy(policy ImageAccountRoutingPolicy) error {
+	raw, err := json.Marshal(policy)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO metadata(key, value) VALUES('image_account_policy', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, raw)
+	return err
+}

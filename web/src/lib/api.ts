@@ -1,7 +1,11 @@
 import { httpRequest } from "@/lib/request";
 import webConfig from "@/constants/common-env";
 import { getStoredAuthKey } from "@/store/auth";
-import { buildImageAccountPolicyHeader } from "@/store/image-account-policy";
+import {
+  buildImageAccountPolicyHeader,
+  normalizeImageAccountPolicy,
+  type StoredImageAccountPolicy,
+} from "@/store/image-account-policy";
 
 export type AccountType = "Free" | "Plus" | "Pro" | "Team";
 export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
@@ -23,6 +27,73 @@ export type ImageResponseItem = {
   conversation_id?: string;
   parent_message_id?: string;
   source_account_id?: string;
+  error?: string;
+};
+
+export type ImageTaskStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancel_requested"
+  | "cancelled"
+  | "expired";
+
+export type ImageTaskWaitingReason =
+  | ""
+  | "global_concurrency"
+  | "paid_account_busy"
+  | "compatible_account_busy"
+  | "source_account_busy"
+  | "retry_backoff";
+
+export type ImageTaskBlocker = {
+  code: string;
+  detail?: string;
+};
+
+export type ImageTaskView = {
+  id: string;
+  conversationId: string;
+  turnId: string;
+  mode: "generate" | "edit" | string;
+  status: ImageTaskStatus;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  count: number;
+  retryImageIndex?: number;
+  queuePosition?: number;
+  waitingReason?: ImageTaskWaitingReason;
+  blockers?: ImageTaskBlocker[];
+  images: ImageResponseItem[];
+  error?: string;
+  cancelRequested?: boolean;
+};
+
+export type ImageTaskSnapshot = {
+  running: number;
+  maxRunning: number;
+  queued: number;
+  total: number;
+  activeSources: {
+    workspace: number;
+    compat: number;
+  };
+  finalStatuses: {
+    succeeded: number;
+    failed: number;
+    cancelled: number;
+    expired: number;
+  };
+  retentionSeconds: number;
+};
+
+export type ImageTaskStreamEvent = {
+  type: string;
+  taskId?: string;
+  task?: ImageTaskView;
+  snapshot?: ImageTaskSnapshot;
 };
 
 export type InpaintSourceReference = {
@@ -181,6 +252,16 @@ type ImageResponse = {
   data: ImageResponseItem[];
 };
 
+type ImageTaskListResponse = {
+  items: ImageTaskView[];
+  snapshot: ImageTaskSnapshot;
+};
+
+type ImageTaskResponse = {
+  task: ImageTaskView;
+  snapshot: ImageTaskSnapshot;
+};
+
 export type ConfigPayload = {
   app: {
     name: string;
@@ -197,6 +278,7 @@ export type ConfigPayload = {
     maxImageConcurrency: number;
     imageQueueLimit: number;
     imageQueueTimeoutSeconds: number;
+    imageTaskQueueTtlSeconds: number;
   };
   chatgpt: {
     model: string;
@@ -380,7 +462,90 @@ export type RuntimeStatusResponse = {
     lastErrorAt?: string;
     lastErrorAccount?: string;
   };
+  tasks: {
+    total: number;
+    running: number;
+    queued: number;
+    activeSources: {
+      workspace: number;
+      compat: number;
+    };
+    finalStatuses: {
+      succeeded: number;
+      failed: number;
+      cancelled: number;
+      expired: number;
+    };
+    retentionSeconds: number;
+  };
 };
+
+type ImageAccountPolicyResponse = {
+  policy: StoredImageAccountPolicy;
+};
+
+let cachedImageAccountPolicy: StoredImageAccountPolicy | null = null;
+let cachedConfig: ConfigPayload | null = null;
+
+export function setCachedImageAccountPolicy(
+  policy: StoredImageAccountPolicy | null,
+) {
+  cachedImageAccountPolicy = policy ? normalizeImageAccountPolicy(policy) : null;
+}
+
+function setCachedConfig(config: ConfigPayload | null) {
+  cachedConfig = config;
+}
+
+export async function fetchImageAccountPolicy() {
+  const data = await httpRequest<ImageAccountPolicyResponse>(
+    "/api/accounts/image-policy",
+  );
+  const normalized = normalizeImageAccountPolicy(data.policy);
+  setCachedImageAccountPolicy(normalized);
+  return normalized;
+}
+
+export async function updateImageAccountPolicy(
+  policy: StoredImageAccountPolicy,
+) {
+  const data = await httpRequest<ImageAccountPolicyResponse>(
+    "/api/accounts/image-policy",
+    {
+      method: "PUT",
+      body: { policy: normalizeImageAccountPolicy(policy) },
+    },
+  );
+  const normalized = normalizeImageAccountPolicy(data.policy);
+  setCachedImageAccountPolicy(normalized);
+  return normalized;
+}
+
+async function getImageAccountPolicyForRequest() {
+  if (cachedImageAccountPolicy) {
+    return cachedImageAccountPolicy;
+  }
+  try {
+    return await fetchImageAccountPolicy();
+  } catch {
+    return normalizeImageAccountPolicy(null);
+  }
+}
+
+function resolveImageResponseFormat(config: ConfigPayload | null) {
+  return config?.storage.imageDataStorage === "server" ? "url" : "b64_json";
+}
+
+async function getImageResponseFormatForRequest() {
+  if (cachedConfig) {
+    return resolveImageResponseFormat(cachedConfig);
+  }
+  try {
+    return resolveImageResponseFormat(await fetchConfig());
+  } catch {
+    return "b64_json";
+  }
+}
 
 export type ProxyTestResult = {
   ok: boolean;
@@ -526,7 +691,9 @@ export async function fetchSyncStatus(
 }
 
 export async function fetchConfig() {
-  return httpRequest<ConfigPayload>("/api/config");
+  const config = await httpRequest<ConfigPayload>("/api/config");
+  setCachedConfig(config);
+  return config;
 }
 
 export async function testProxy(url?: string) {
@@ -577,10 +744,12 @@ export async function fetchDefaultConfig() {
 }
 
 export async function updateConfig(config: ConfigPayload) {
-  return httpRequest<{ status: string; config: ConfigPayload }>("/api/config", {
+  const result = await httpRequest<{ status: string; config: ConfigPayload }>("/api/config", {
     method: "PUT",
     body: config,
   });
+  setCachedConfig(result.config);
+  return result;
 }
 
 export async function fetchRequestLogs() {
@@ -664,7 +833,12 @@ export async function generateImageWithOptions(
   } = {},
 ) {
   const { model = "gpt-image-2", count = 1, size, quality = "high" } = options;
-  const policyHeader = buildImageAccountPolicyHeader();
+  const [policy, responseFormat] = await Promise.all([
+    getImageAccountPolicyForRequest(),
+    getImageResponseFormatForRequest(),
+  ]);
+  const policyHeader = buildImageAccountPolicyHeader(policy);
+  const normalizedCount = Math.max(1, count);
   return httpRequest<ImageResponse>("/v1/images/generations", {
     method: "POST",
     headers: policyHeader
@@ -673,12 +847,140 @@ export async function generateImageWithOptions(
     body: {
       prompt,
       model,
-      n: Math.max(1, count),
+      n: normalizedCount,
       size: size?.trim() || undefined,
       quality,
-      response_format: "b64_json",
+      response_format: responseFormat,
     },
   });
+}
+
+export async function createImageTask(payload: {
+  taskId?: string;
+  conversationId: string;
+  turnId: string;
+  mode: "generate" | "edit";
+  prompt: string;
+  model?: ImageModel;
+  count?: number;
+  retryImageIndex?: number;
+  size?: string;
+  quality?: ImageQuality;
+  sourceImages?: Array<{
+    id: string;
+    role: "image" | "mask";
+    name: string;
+    dataUrl?: string;
+    url?: string;
+  }>;
+  sourceReference?: InpaintSourceReference;
+  policy?: StoredImageAccountPolicy;
+}) {
+  const policy = payload.policy ?? (await getImageAccountPolicyForRequest());
+  return httpRequest<ImageTaskResponse>("/api/image/tasks", {
+    method: "POST",
+    body: {
+      taskId: payload.taskId?.trim() || undefined,
+      conversationId: payload.conversationId,
+      turnId: payload.turnId,
+      mode: payload.mode,
+      prompt: payload.prompt,
+      model: payload.model ?? "gpt-image-2",
+      count: Math.max(1, payload.count ?? 1),
+      retryImageIndex:
+        typeof payload.retryImageIndex === "number"
+          ? payload.retryImageIndex
+          : undefined,
+      size: payload.size?.trim() || undefined,
+      quality: payload.quality,
+      sourceImages: payload.sourceImages ?? [],
+      sourceReference: payload.sourceReference,
+      policy: normalizeImageAccountPolicy(policy),
+    },
+  });
+}
+
+export async function listImageTasks() {
+  return httpRequest<ImageTaskListResponse>("/api/image/tasks");
+}
+
+export async function cancelImageTask(taskId: string) {
+  return httpRequest<ImageTaskResponse>(
+    `/api/image/tasks/${encodeURIComponent(taskId)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export async function consumeImageTaskStream(
+  handlers: {
+    onInit: (payload: { items: ImageTaskView[]; snapshot: ImageTaskSnapshot }) => void;
+    onEvent: (event: ImageTaskStreamEvent) => void;
+  },
+  signal: AbortSignal,
+) {
+  const authKey = await getStoredAuthKey();
+  const response = await fetch(
+    `${webConfig.apiUrl.replace(/\/$/, "")}/api/image/tasks/stream`,
+    {
+      method: "GET",
+      headers: authKey ? { Authorization: `Bearer ${authKey}` } : {},
+      signal,
+    },
+  );
+  if (!response.ok || !response.body) {
+    throw new Error(`task stream failed (${response.status})`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventType = "message";
+  let dataLines: string[] = [];
+
+  const flushEvent = () => {
+    if (dataLines.length === 0) {
+      eventType = "message";
+      return;
+    }
+    const raw = dataLines.join("\n");
+    dataLines = [];
+    try {
+      if (eventType === "init") {
+        handlers.onInit(JSON.parse(raw) as { items: ImageTaskView[]; snapshot: ImageTaskSnapshot });
+      } else {
+        handlers.onEvent(JSON.parse(raw) as ImageTaskStreamEvent);
+      }
+    } finally {
+      eventType = "message";
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      flushEvent();
+      return;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line) {
+        flushEvent();
+        continue;
+      }
+      if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim() || "message";
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+  }
 }
 
 export async function editImage({
@@ -699,10 +1001,14 @@ export async function editImage({
   model?: ImageModel;
 }) {
   const formData = new FormData();
-  const policyHeader = buildImageAccountPolicyHeader();
+  const [policy, responseFormat] = await Promise.all([
+    getImageAccountPolicyForRequest(),
+    getImageResponseFormatForRequest(),
+  ]);
+  const policyHeader = buildImageAccountPolicyHeader(policy);
   formData.append("prompt", prompt);
   formData.append("model", model);
-  formData.append("response_format", "b64_json");
+  formData.append("response_format", responseFormat);
   if (size?.trim()) {
     formData.append("size", size.trim());
   }

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type ReactNode, type RefObject } from "react";
 import Zoom from "react-medium-image-zoom";
-import { ArrowUp, Brush, ChevronDown, CircleHelp, ImagePlus, LoaderCircle, Trash2, Upload } from "lucide-react";
+import { ArrowUp, Brush, ChevronDown, CircleHelp, ImagePlus, Trash2, Upload } from "lucide-react";
 
 import { AppImage as Image } from "@/components/app-image";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,6 @@ type PromptComposerProps = {
   availableQuota: string;
   sourceImages: StoredSourceImage[];
   imagePrompt: string;
-  isSubmitting: boolean;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   uploadInputRef: RefObject<HTMLInputElement | null>;
   maskInputRef: RefObject<HTMLInputElement | null>;
@@ -74,7 +73,6 @@ export function PromptComposer({
   availableQuota,
   sourceImages,
   imagePrompt,
-  isSubmitting,
   textareaRef,
   uploadInputRef,
   maskInputRef,
@@ -301,7 +299,6 @@ export function PromptComposer({
                           className="rounded-md p-1 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
                           title="选区编辑"
                           aria-label="选区编辑"
-                          disabled={isSubmitting}
                         >
                           <Brush className="size-3.5" />
                         </button>
@@ -349,9 +346,7 @@ export function PromptComposer({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  if (!isSubmitting) {
-                    void onSubmit();
-                  }
+                  void onSubmit();
                 }
               }}
               className={cn(
@@ -400,11 +395,10 @@ export function PromptComposer({
               <button
                 type="button"
                 onClick={() => void onSubmit()}
-                disabled={isSubmitting}
                 className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-stone-950 text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300 sm:size-9"
                 aria-label="提交图片任务"
               >
-                {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+                <ArrowUp className="size-4" />
               </button>
             </div>
           </div>

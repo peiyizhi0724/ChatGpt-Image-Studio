@@ -12,6 +12,7 @@ import (
 
 	"chatgpt2api/internal/accounts"
 	"chatgpt2api/internal/config"
+	"chatgpt2api/internal/imagehistory"
 )
 
 func TestExtractCompatPromptAndImagesFromMessages(t *testing.T) {
@@ -160,6 +161,39 @@ func TestNormalizeThirdPartyImageResponseFormatForThirdPartyKey(t *testing.T) {
 	}
 }
 
+func TestHandleImageEditsSelectionEditRequiresSourceAccountID(t *testing.T) {
+	server, _ := newImageModeCompatTestServerWithOptions(t, imageModeCompatScenario{
+		imageMode:   "studio",
+		accountType: "Plus",
+		freeRoute:   "legacy",
+		freeModel:   "auto",
+		paidRoute:   "responses",
+		paidModel:   "gpt-5.4-mini",
+	}, compatTestServerOptions{})
+
+	req := newCompatMultipartRequest(t, "/v1/images/edits", map[string]string{
+		"prompt":            "selection prompt",
+		"model":             "gpt-image-2",
+		"response_format":   "b64_json",
+		"original_file_id":  "file-1",
+		"original_gen_id":   "gen-1",
+		"conversation_id":   "conv-1",
+		"parent_message_id": "msg-1",
+	}, map[string][][]byte{
+		"mask": {[]byte("selection-mask")},
+	}, server.cfg.App.APIKey)
+
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "source_account_id is required") {
+		t.Fatalf("body = %s, want missing source_account_id message", rec.Body.String())
+	}
+}
+
 func TestImageGenerationPreservesPaidResolutionErrorCode(t *testing.T) {
 	server := newCompatFreeOnlyStudioServer(t)
 
@@ -292,6 +326,76 @@ func TestBuildCompatResponsesResponse(t *testing.T) {
 	}
 	if got := stringValue(output[0]["result"]); got != "ZmFrZQ==" {
 		t.Fatalf("output[0].result = %q, want %q", got, "ZmFrZQ==")
+	}
+}
+
+func TestCompatTaskPayloadKeepsPartialSuccess(t *testing.T) {
+	payload, err := compatTaskPayload(&imageTaskView{
+		ID:        "compat-task-1",
+		Status:    imageTaskStatusFailed,
+		CreatedAt: "2026-04-27T10:00:00Z",
+		Images: []imagehistory.Image{
+			{
+				ID:              "img-ok",
+				Status:          "success",
+				URL:             "/v1/files/image/success.png",
+				RevisedPrompt:   "ok",
+				SourceAccountID: "account-1",
+			},
+			{
+				ID:     "img-fail",
+				Status: "error",
+				Error:  "temporary upstream failure",
+			},
+		},
+		Error: "temporary upstream failure",
+	})
+	if err != nil {
+		t.Fatalf("compatTaskPayload() returned error: %v", err)
+	}
+
+	data, ok := payload["data"].([]map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want []map[string]any", payload["data"])
+	}
+	if len(data) != 1 {
+		t.Fatalf("len(data) = %d, want 1", len(data))
+	}
+	if got := stringValue(data[0]["url"]); got != "/v1/files/image/success.png" {
+		t.Fatalf("data[0].url = %q, want cached file url", got)
+	}
+
+	taskErrors, ok := payload["errors"].([]map[string]any)
+	if !ok {
+		t.Fatalf("errors type = %T, want []map[string]any", payload["errors"])
+	}
+	if len(taskErrors) != 1 {
+		t.Fatalf("len(errors) = %d, want 1", len(taskErrors))
+	}
+	if got := stringValue(taskErrors[0]["error"]); got != "temporary upstream failure" {
+		t.Fatalf("errors[0].error = %q, want propagated failure", got)
+	}
+}
+
+func TestCompatTaskPayloadReturnsErrorWhenAllUnitsFail(t *testing.T) {
+	_, err := compatTaskPayload(&imageTaskView{
+		ID:        "compat-task-2",
+		Status:    imageTaskStatusFailed,
+		CreatedAt: "2026-04-27T10:00:00Z",
+		Images: []imagehistory.Image{
+			{
+				ID:     "img-fail",
+				Status: "error",
+				Error:  "all failed",
+			},
+		},
+		Error: "all failed",
+	})
+	if err == nil {
+		t.Fatal("compatTaskPayload() error = nil, want failure")
+	}
+	if err.Error() != "all failed" {
+		t.Fatalf("compatTaskPayload() error = %q, want propagated task error", err.Error())
 	}
 }
 

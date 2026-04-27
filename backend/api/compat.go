@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"chatgpt2api/handler"
 	"chatgpt2api/internal/accounts"
 	"chatgpt2api/internal/imaging"
 )
@@ -36,6 +35,18 @@ type imageEditRequest struct {
 	Size           string
 	Quality        string
 	ResponseFormat string
+}
+
+type imageSelectionEditRequest struct {
+	Model           string
+	Prompt          string
+	Mask            []byte
+	OriginalFileID  string
+	OriginalGenID   string
+	ConversationID  string
+	ParentMessageID string
+	SourceAccountID string
+	ResponseFormat  string
 }
 
 type compatChatCompletionRequest struct {
@@ -98,51 +109,54 @@ func (s *Server) executeImageGeneration(ctx context.Context, req imageGeneration
 	}
 	size := normalizeGenerateImageSize(req.Size)
 	requirePaidAccount := s.configuredImageMode() == "studio" && imaging.RequiresPaidGenerateAccount(size)
+	var allowAccount func(accounts.PublicAccount) bool
+	if requirePaidAccount {
+		allowAccount = func(account accounts.PublicAccount) bool {
+			return isPaidImageAccountType(account.Type)
+		}
+	}
+	policy, err := parseRequestImageAccountRoutingPolicy(r)
+	if err != nil {
+		return nil, err
+	}
 
-	requestedModel := normalizeRequestedImageModel(req.Model, s.cfg.ChatGPT.Model)
-	responseFormat := firstNonEmpty(req.ResponseFormat, s.cfg.App.ImageFormat, "url")
-	combined := make([]map[string]any, 0, req.N)
-	imageErrors := make([]string, 0)
-	var firstRequestErr error
-	for range req.N {
-		var allowAccount func(accounts.PublicAccount) bool
+	count, countErr := s.getStore().CountPotentialImageAuthCandidatesWithPolicyFilteredWithDisabledOption(
+		allowAccount,
+		s.allowDisabledStudioImageAccounts(),
+		policy,
+	)
+	if countErr != nil {
+		return nil, countErr
+	}
+	if count == 0 {
 		if requirePaidAccount {
-			allowAccount = func(account accounts.PublicAccount) bool {
-				return isPaidImageAccountType(account.Type)
-			}
+			return nil, newRequestError("paid_resolution_requires_paid_account", "当前分辨率仅支持 Plus / Pro / Team 图片账号，请先确保有可用 Paid 账号")
 		}
-
-		data, err := s.withImageResultsFilteredWithMetadata(ctx, "generate", responseFormat, "", requestedModel, true, allowAccount, newImageRequestMetadata(prompt, size, req.Quality), func(client imageWorkflowClient, upstreamModel string) ([]handler.ImageResult, error) {
-			return client.GenerateImage(ctx, prompt, upstreamModel, 1, size, req.Quality, req.Background)
-		}, r)
-		if err != nil {
-			if requirePaidAccount && errors.Is(err, accounts.ErrNoAvailableImageAuth) {
-				err = newRequestError("paid_resolution_requires_paid_account", "当前分辨率仅支持 Plus / Pro / Team 图片账号，请先确保有可用 Paid 账号")
-			}
-			if firstRequestErr == nil && requestErrorCode(err) != "" {
-				firstRequestErr = err
-			}
-			imageErrors = append(imageErrors, err.Error())
-			continue
-		}
-		combined = append(combined, data...)
+		return nil, newRequestError("no_available_image_accounts", "当前没有可用的图片账号")
 	}
 
-	if len(combined) == 0 {
-		if firstRequestErr != nil {
-			return nil, firstRequestErr
-		}
-		return nil, errors.New(firstNonEmpty(strings.Join(imageErrors, "; "), "image generation failed"))
+	task, err := s.imageTasks.createTask(createImageTaskRequest{
+		ConversationID: "",
+		TurnID:         fmt.Sprintf("compat-generate-%d", time.Now().UnixNano()),
+		Source:         "compat",
+		Mode:           "generate",
+		Prompt:         prompt,
+		Model:          normalizeRequestedImageModel(req.Model, s.cfg.ChatGPT.Model),
+		Count:          req.N,
+		Size:           size,
+		Quality:        strings.TrimSpace(req.Quality),
+		Background:     strings.TrimSpace(req.Background),
+		ResponseFormat: firstNonEmpty(req.ResponseFormat, s.cfg.App.ImageFormat, "url"),
+		Policy:         policy,
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	payload := map[string]any{
-		"created": time.Now().Unix(),
-		"data":    combined,
+	finalTask, err := s.imageTasks.waitForTask(ctx, task.ID)
+	if err != nil {
+		return nil, err
 	}
-	if len(imageErrors) > 0 {
-		payload["errors"] = imageErrors
-	}
-	return payload, nil
+	return compatTaskPayload(finalTask)
 }
 
 func normalizeGenerateImageSize(value string) string {
@@ -157,19 +171,101 @@ func (s *Server) executeImageEdit(ctx context.Context, req imageEditRequest, r *
 	if len(req.Images) == 0 {
 		return nil, newRequestError("image_required", "at least one image is required")
 	}
-
-	requestedModel := normalizeRequestedImageModel(req.Model, s.cfg.ChatGPT.Model)
-	responseFormat := firstNonEmpty(req.ResponseFormat, s.cfg.App.ImageFormat, "url")
-	data, err := s.withImageResultsWithMetadata(ctx, "edit", responseFormat, "", requestedModel, handler.SupportsResponsesInlineEdit(req.Images, req.Mask), newImageRequestMetadata(prompt, req.Size, req.Quality), func(client imageWorkflowClient, upstreamModel string) ([]handler.ImageResult, error) {
-		return client.EditImageByUpload(ctx, prompt, upstreamModel, req.Images, req.Mask, req.Size, req.Quality)
-	}, r)
+	sourceImages := make([]imageTaskSourceImagePayload, 0, len(req.Images)+1)
+	for index, image := range req.Images {
+		sourceImages = append(sourceImages, imageTaskSourceImagePayload{
+			ID:      fmt.Sprintf("compat-image-%d", index),
+			Role:    "image",
+			Name:    fmt.Sprintf("image-%d.png", index+1),
+			DataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(image),
+		})
+	}
+	if len(req.Mask) > 0 {
+		sourceImages = append(sourceImages, imageTaskSourceImagePayload{
+			ID:      "compat-mask",
+			Role:    "mask",
+			Name:    "mask.png",
+			DataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(req.Mask),
+		})
+	}
+	policy, err := parseRequestImageAccountRoutingPolicy(r)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"created": time.Now().Unix(),
-		"data":    data,
-	}, nil
+
+	task, err := s.imageTasks.createTask(createImageTaskRequest{
+		ConversationID: "",
+		TurnID:         fmt.Sprintf("compat-edit-%d", time.Now().UnixNano()),
+		Source:         "compat",
+		Mode:           "edit",
+		Prompt:         prompt,
+		Model:          normalizeRequestedImageModel(req.Model, s.cfg.ChatGPT.Model),
+		Count:          1,
+		Size:           strings.TrimSpace(req.Size),
+		Quality:        strings.TrimSpace(req.Quality),
+		ResponseFormat: firstNonEmpty(req.ResponseFormat, s.cfg.App.ImageFormat, "url"),
+		SourceImages:   sourceImages,
+		Policy:         policy,
+	})
+	if err != nil {
+		return nil, err
+	}
+	finalTask, err := s.imageTasks.waitForTask(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	return compatTaskPayload(finalTask)
+}
+
+func (s *Server) executeImageSelectionEdit(ctx context.Context, req imageSelectionEditRequest, r *http.Request) (map[string]any, error) {
+	prompt := strings.TrimSpace(req.Prompt)
+	if prompt == "" {
+		return nil, newRequestError("prompt_required", "prompt is required")
+	}
+	if len(req.Mask) == 0 {
+		return nil, newRequestError("mask_required", "mask is required for selection edit")
+	}
+	if strings.TrimSpace(req.OriginalFileID) == "" || strings.TrimSpace(req.OriginalGenID) == "" {
+		return nil, newRequestError("source_context_required", "original_file_id and original_gen_id are required for selection edit")
+	}
+	sourceAccountID := strings.TrimSpace(req.SourceAccountID)
+	if sourceAccountID == "" {
+		return nil, newRequestError("source_account_id_required", "source_account_id is required for selection edit")
+	}
+
+	task, err := s.imageTasks.createTask(createImageTaskRequest{
+		ConversationID: "",
+		TurnID:         fmt.Sprintf("compat-selection-edit-%d", time.Now().UnixNano()),
+		Source:         "compat",
+		Mode:           "edit",
+		Prompt:         prompt,
+		Model:          normalizeRequestedImageModel(req.Model, s.cfg.ChatGPT.Model),
+		Count:          1,
+		ResponseFormat: firstNonEmpty(req.ResponseFormat, s.cfg.App.ImageFormat, "url"),
+		SourceImages: []imageTaskSourceImagePayload{
+			{
+				ID:      "compat-mask",
+				Role:    "mask",
+				Name:    "mask.png",
+				DataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(req.Mask),
+			},
+		},
+		SourceReference: &imageTaskSourceReferencePayload{
+			OriginalFileID:  strings.TrimSpace(req.OriginalFileID),
+			OriginalGenID:   strings.TrimSpace(req.OriginalGenID),
+			ConversationID:  strings.TrimSpace(req.ConversationID),
+			ParentMessageID: strings.TrimSpace(req.ParentMessageID),
+			SourceAccountID: sourceAccountID,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	finalTask, err := s.imageTasks.waitForTask(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	return compatTaskPayload(finalTask)
 }
 
 func (s *Server) handleImageChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +384,77 @@ func (s *Server) runCompatImageRequest(ctx context.Context, r *http.Request, req
 		Quality:        req.Quality,
 		ResponseFormat: "b64_json",
 	}, r)
+}
+
+func compatTaskPayload(task *imageTaskView) (map[string]any, error) {
+	if task == nil {
+		return nil, fmt.Errorf("image task not found")
+	}
+
+	created := time.Now().Unix()
+	if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(task.CreatedAt)); err == nil {
+		created = parsed.Unix()
+	}
+
+	data := make([]map[string]any, 0, len(task.Images))
+	taskErrors := make([]map[string]any, 0)
+	firstFailure := ""
+
+	for index, image := range task.Images {
+		item := map[string]any{
+			"id":                firstNonEmpty(strings.TrimSpace(image.ID), fmt.Sprintf("%s-%d", task.ID, index)),
+			"revised_prompt":    strings.TrimSpace(image.RevisedPrompt),
+			"file_id":           strings.TrimSpace(image.FileID),
+			"gen_id":            strings.TrimSpace(image.GenID),
+			"conversation_id":   strings.TrimSpace(image.ConversationID),
+			"parent_message_id": strings.TrimSpace(image.ParentMessageID),
+		}
+		if sourceAccountID := strings.TrimSpace(image.SourceAccountID); sourceAccountID != "" {
+			item["source_account_id"] = sourceAccountID
+		}
+
+		switch {
+		case strings.TrimSpace(image.B64JSON) != "":
+			item["b64_json"] = strings.TrimSpace(image.B64JSON)
+			data = append(data, item)
+		case strings.TrimSpace(image.URL) != "":
+			item["url"] = strings.TrimSpace(image.URL)
+			data = append(data, item)
+		default:
+			message := firstNonEmpty(strings.TrimSpace(image.Error), strings.TrimSpace(task.Error), "image generation failed")
+			if firstFailure == "" {
+				firstFailure = message
+			}
+			taskErrors = append(taskErrors, map[string]any{
+				"index":   index,
+				"id":      item["id"],
+				"status":  firstNonEmpty(strings.TrimSpace(image.Status), "error"),
+				"error":   message,
+				"file_id": item["file_id"],
+				"gen_id":  item["gen_id"],
+			})
+		}
+	}
+
+	if len(data) == 0 {
+		switch task.Status {
+		case imageTaskStatusCancelled:
+			return nil, errors.New("image task was cancelled")
+		case imageTaskStatusExpired:
+			return nil, errors.New("image task expired")
+		default:
+			return nil, errors.New(firstNonEmpty(firstFailure, strings.TrimSpace(task.Error), "image generation failed"))
+		}
+	}
+
+	payload := map[string]any{
+		"created": created,
+		"data":    data,
+	}
+	if len(taskErrors) > 0 {
+		payload["errors"] = taskErrors
+	}
+	return payload, nil
 }
 
 func normalizeCompatRequestedModel(model, fallback string) string {

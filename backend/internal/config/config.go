@@ -49,6 +49,7 @@ type ServerConfig struct {
 	MaxImageConcurrency      int    `toml:"max_image_concurrency"`
 	ImageQueueLimit          int    `toml:"image_queue_limit"`
 	ImageQueueTimeoutSeconds int    `toml:"image_queue_timeout_seconds"`
+	ImageTaskQueueTTLSeconds int    `toml:"image_task_queue_ttl_seconds"`
 }
 
 type ChatGPTConfig struct {
@@ -531,6 +532,17 @@ func (c *Config) ImageQueueConfig() (int, int, time.Duration) {
 	return maxImageConcurrency, imageQueueLimit, time.Duration(timeoutSeconds) * time.Second
 }
 
+func (c *Config) ImageTaskQueueTTL() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	ttlSeconds := c.Server.ImageTaskQueueTTLSeconds
+	if ttlSeconds <= 0 {
+		ttlSeconds = 600
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
 func (c *Config) ImageQuotaRefreshTTL() time.Duration {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -593,6 +605,9 @@ func (c *Config) validate() error {
 	if c.Server.ImageQueueTimeoutSeconds <= 0 {
 		c.Server.ImageQueueTimeoutSeconds = 20
 	}
+	if c.Server.ImageTaskQueueTTLSeconds <= 0 {
+		c.Server.ImageTaskQueueTTLSeconds = 600
+	}
 	if c.Accounts.ImageQuotaRefreshTTLSeconds <= 0 {
 		c.Accounts.ImageQuotaRefreshTTLSeconds = 120
 	}
@@ -603,19 +618,22 @@ func (c *Config) validate() error {
 		c.ChatGPT.ImageMode = normalized
 	}
 
-	for _, item := range []struct {
-		name  string
-		value string
-	}{
-		{name: "chatgpt.free_image_route", value: c.ChatGPT.FreeImageRoute},
-		{name: "chatgpt.paid_image_route", value: c.ChatGPT.PaidImageRoute},
-	} {
-		if normalized, ok := normalizeImageRoute(item.value); !ok {
-			return fmt.Errorf("invalid %s %q: only legacy or responses are supported", item.name, strings.TrimSpace(item.value))
-		} else if normalized == "" {
-			return fmt.Errorf("invalid %s %q", item.name, strings.TrimSpace(item.value))
-		}
+	if normalized, ok := normalizeImageRoute(c.ChatGPT.FreeImageRoute); !ok {
+		return fmt.Errorf("invalid chatgpt.free_image_route %q: only legacy or responses are supported", strings.TrimSpace(c.ChatGPT.FreeImageRoute))
+	} else if normalized == "" {
+		return fmt.Errorf("invalid chatgpt.free_image_route %q", strings.TrimSpace(c.ChatGPT.FreeImageRoute))
+	} else {
+		c.ChatGPT.FreeImageRoute = normalized
 	}
+	if normalized, ok := normalizeImageRoute(c.ChatGPT.PaidImageRoute); !ok {
+		return fmt.Errorf("invalid chatgpt.paid_image_route %q: only legacy or responses are supported", strings.TrimSpace(c.ChatGPT.PaidImageRoute))
+	} else if normalized == "" {
+		return fmt.Errorf("invalid chatgpt.paid_image_route %q", strings.TrimSpace(c.ChatGPT.PaidImageRoute))
+	} else {
+		c.ChatGPT.PaidImageRoute = normalized
+	}
+	c.ChatGPT.FreeImageModel = normalizeConfiguredImageRouteModel(c.ChatGPT.FreeImageRoute, c.ChatGPT.FreeImageModel, "auto", true)
+	c.ChatGPT.PaidImageModel = normalizeConfiguredImageRouteModel(c.ChatGPT.PaidImageRoute, c.ChatGPT.PaidImageModel, "gpt-5.4-mini", false)
 
 	c.CPA.RouteStrategy = normalizeCPAImageRouteStrategy(c.CPA.RouteStrategy)
 	c.Storage.Backend = normalizeStorageBackend(c.Storage.Backend)
@@ -719,6 +737,25 @@ func normalizeImageRoute(route string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func normalizeConfiguredImageRouteModel(route, value, fallback string, allowAuto bool) string {
+	model := strings.ToLower(strings.TrimSpace(value))
+	if model == "" {
+		return fallback
+	}
+	if allowAuto && model == "auto" {
+		return "auto"
+	}
+	switch model {
+	case "gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5-5-thinking":
+		return model
+	case "gpt-image-1", "gpt-image-2":
+		if normalizedRoute, _ := normalizeImageRoute(route); normalizedRoute != "responses" {
+			return model
+		}
+	}
+	return fallback
 }
 
 func normalizeImageMode(mode string) (string, bool) {

@@ -63,6 +63,14 @@ type runtimeStatusResponse struct {
 		LastErrorAt      string `json:"lastErrorAt,omitempty"`
 		LastErrorAccount string `json:"lastErrorAccount,omitempty"`
 	} `json:"recent"`
+	Tasks struct {
+		Total            int                          `json:"total"`
+		Running          int                          `json:"running"`
+		Queued           int                          `json:"queued"`
+		ActiveSources    imageTaskSourceSnapshot      `json:"activeSources"`
+		FinalStatuses    imageTaskFinalStatusSnapshot `json:"finalStatuses"`
+		RetentionSeconds int                          `json:"retentionSeconds"`
+	} `json:"tasks"`
 }
 
 type diagnosticsExportPayload struct {
@@ -115,6 +123,17 @@ func (s *Server) collectRuntimeStatus() runtimeStatusResponse {
 		out.Admission.QueueTimeoutMS = snapshot.QueueTimeoutMS
 		out.Admission.Inflight = snapshot.Inflight
 		out.Admission.Queued = snapshot.Queued
+	}
+	if s.imageTasks != nil {
+		_, snapshot := s.imageTasks.listTasks()
+		if snapshot != nil {
+			out.Tasks.Total = snapshot.Total
+			out.Tasks.Running = snapshot.Running
+			out.Tasks.Queued = snapshot.Queued
+			out.Tasks.ActiveSources = snapshot.ActiveSources
+			out.Tasks.FinalStatuses = snapshot.FinalStatuses
+			out.Tasks.RetentionSeconds = snapshot.RetentionSeconds
+		}
 	}
 
 	accountsList, err := s.getStore().ListAccounts()

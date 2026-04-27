@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -441,6 +442,28 @@ func TestIsImageRateLimitError(t *testing.T) {
 	}
 }
 
+func TestIsTransientImageStreamError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "responses sse internal error", err: errors.New("responses SSE read error: stream error: stream ID 1; INTERNAL_ERROR; received from peer"), want: true},
+		{name: "unexpected eof", err: errors.New("SSE read error: unexpected EOF"), want: true},
+		{name: "http2 connection lost", err: errors.New("http2: client connection lost"), want: true},
+		{name: "non transient", err: errors.New("no images generated"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTransientImageStreamError(tt.err); got != tt.want {
+				t.Fatalf("isTransientImageStreamError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStudioPaidResolutionUsesPaidAccount(t *testing.T) {
 	server, recorder := newImageModeCompatTestServerWithOptions(t, imageModeCompatScenario{
 		imageMode:   "studio",
@@ -494,6 +517,9 @@ func TestStudioPaidResolutionUsesPaidAccount(t *testing.T) {
 	}
 	if entry.Quality != "high" {
 		t.Fatalf("log quality = %q, want %q", entry.Quality, "high")
+	}
+	if entry.ImageToolModel != "gpt-5.4-mini" {
+		t.Fatalf("log image tool model = %q, want %q", entry.ImageToolModel, "gpt-5.4-mini")
 	}
 	if entry.PromptLength != 11 {
 		t.Fatalf("log prompt length = %d, want 11", entry.PromptLength)
@@ -634,5 +660,77 @@ func TestStudioResponsesRateLimitedAccountRetriesWithNextAccount(t *testing.T) {
 	}
 	if limitedAccount.Quota != 0 {
 		t.Fatalf("limited paid account quota = %d, want 0", limitedAccount.Quota)
+	}
+}
+
+func TestStudioPaidResolutionFallsBackOutsideSelectedFreeOnlyGroup(t *testing.T) {
+	server, recorder := newImageModeCompatTestServerWithOptions(t, imageModeCompatScenario{
+		imageMode:   "studio",
+		accountType: "Plus",
+		freeRoute:   "legacy",
+		freeModel:   "auto",
+		paidRoute:   "responses",
+		paidModel:   "gpt-5.4-mini",
+	}, compatTestServerOptions{
+		accounts: []compatSeedAccount{
+			{
+				fileName:    "free-1.json",
+				accessToken: "token-free-1",
+				accountType: "Free",
+				priority:    10,
+				quota:       5,
+				status:      "正常",
+			},
+			{
+				fileName:    "free-2.json",
+				accessToken: "token-free-2",
+				accountType: "Free",
+				priority:    9,
+				quota:       5,
+				status:      "正常",
+			},
+			{
+				fileName:    "paid-1.json",
+				accessToken: "token-paid-1",
+				accountType: "Plus",
+				priority:    8,
+				quota:       5,
+				status:      "正常",
+			},
+		},
+	})
+
+	policyHeader := base64.RawURLEncoding.EncodeToString([]byte(`{
+		"enabled": true,
+		"sortMode": "imported_at",
+		"groupSize": 2,
+		"enabledGroupIndexes": [0],
+		"reserveMode": "daily_first_seen_percent",
+		"reservePercent": 20
+	}`))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"prompt":"test prompt","size":"2560x1440","quality":"high","response_format":"b64_json"}`))
+	req.Header.Set("Authorization", "Bearer "+server.cfg.App.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(imageAccountPolicyHeader, policyHeader)
+
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if recorder.lastFactory != "responses" {
+		t.Fatalf("last factory = %q, want responses", recorder.lastFactory)
+	}
+	if got := recorder.callSequence[len(recorder.callSequence)-1]; !strings.Contains(got, "token-paid-1") {
+		t.Fatalf("call sequence = %v, want paid fallback selected", recorder.callSequence)
+	}
+	entries := server.reqLogs.list(1)
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	if entries[0].RoutingPolicyApplied {
+		t.Fatalf("expected fallback outside selected groups to skip policy-applied log flag, got %#v", entries[0])
 	}
 }

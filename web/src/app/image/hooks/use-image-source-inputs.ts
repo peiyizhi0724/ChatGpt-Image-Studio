@@ -17,7 +17,6 @@ export type EditorTarget = {
 
 type UseImageSourceInputsOptions = {
   mode: ImageMode;
-  isSubmitting: boolean;
   selectedConversationId: string | null;
   setMode: (mode: ImageMode) => void;
   focusConversation: (conversationId: string) => void;
@@ -58,7 +57,6 @@ function buildStoredSourceImageFromURL(payload: {
 
 export function useImageSourceInputs({
   mode,
-  isSubmitting,
   selectedConversationId,
   setMode,
   focusConversation,
@@ -90,9 +88,6 @@ export function useImageSourceInputs({
   }, [makeId]);
 
   const handlePromptPaste = useCallback((event: ReactClipboardEvent<HTMLTextAreaElement>) => {
-    if (isSubmitting) {
-      return;
-    }
     const clipboardImages = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
@@ -109,7 +104,7 @@ export function useImageSourceInputs({
         ? "已从剪贴板添加参考图"
         : "已从剪贴板添加源图",
     );
-  }, [appendFiles, isSubmitting, mode]);
+  }, [appendFiles, mode]);
 
   const removeSourceImage = useCallback((id: string) => {
     setSourceImages((prev) => prev.filter((item) => item.id !== id));

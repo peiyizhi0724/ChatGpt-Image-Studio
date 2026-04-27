@@ -14,6 +14,8 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 7000
       TZ: ${TZ:-Asia/Shanghai}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./backend/data:/app/data
     restart: unless-stopped

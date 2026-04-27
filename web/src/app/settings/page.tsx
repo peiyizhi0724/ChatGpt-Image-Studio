@@ -76,6 +76,7 @@ function defaultConfigPayload(): ConfigPayload {
       maxImageConcurrency: 8,
       imageQueueLimit: 32,
       imageQueueTimeoutSeconds: 20,
+      imageTaskQueueTtlSeconds: 600,
     },
     chatgpt: {
       model: "gpt-image-2",

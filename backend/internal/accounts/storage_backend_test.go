@@ -294,3 +294,154 @@ func TestReplaceAllDataOverwritesExistingSQLiteSnapshot(t *testing.T) {
 		t.Fatalf("replaced sqlite token = %q, want %q", got, "source-token")
 	}
 }
+
+func TestImageRoutingPolicyPersistsInCurrentBackend(t *testing.T) {
+	rootDir := t.TempDir()
+	cfg := config.New(rootDir)
+	cfg.Storage.Backend = "current"
+	cfg.Storage.AuthDir = "data/auths"
+	cfg.Storage.StateFile = "data/accounts_state.json"
+	cfg.Storage.SyncStateDir = "data/sync_state"
+	cfg.Accounts.DefaultQuota = 5
+	cfg.Accounts.RefreshWorkers = 1
+	cfg.Sync.ProviderType = "codex"
+
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore(current) returned error: %v", err)
+	}
+
+	policy := ImageAccountRoutingPolicy{
+		Enabled:             true,
+		SortMode:            "quota",
+		GroupSize:           7,
+		EnabledGroupIndexes: []int{1, 3},
+		ReserveMode:         "daily_first_seen_percent",
+		ReservePercent:      25,
+	}
+	if err := store.SaveImageRoutingPolicy(policy); err != nil {
+		t.Fatalf("SaveImageRoutingPolicy(current) returned error: %v", err)
+	}
+
+	reloaded, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore(current reload) returned error: %v", err)
+	}
+	got, err := reloaded.GetImageRoutingPolicy()
+	if err != nil {
+		t.Fatalf("GetImageRoutingPolicy(current) returned error: %v", err)
+	}
+	if !got.Enabled || got.SortMode != "quota" || got.GroupSize != 7 || got.ReservePercent != 25 {
+		t.Fatalf("current persisted policy = %#v", got)
+	}
+	if len(got.EnabledGroupIndexes) != 2 || got.EnabledGroupIndexes[0] != 1 || got.EnabledGroupIndexes[1] != 3 {
+		t.Fatalf("current persisted group indexes = %#v", got.EnabledGroupIndexes)
+	}
+}
+
+func TestImageRoutingPolicyPersistsInSQLiteBackend(t *testing.T) {
+	rootDir := t.TempDir()
+	cfg := config.New(rootDir)
+	cfg.Storage.Backend = "sqlite"
+	cfg.Storage.AuthDir = "data/auths"
+	cfg.Storage.StateFile = "data/accounts_state.json"
+	cfg.Storage.SyncStateDir = "data/sync_state"
+	cfg.Storage.SQLitePath = "data/accounts.sqlite"
+	cfg.Accounts.DefaultQuota = 5
+	cfg.Accounts.RefreshWorkers = 1
+	cfg.Sync.ProviderType = "codex"
+
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore(sqlite) returned error: %v", err)
+	}
+	if backend, ok := store.storage().(*sqliteAccountStorage); ok {
+		t.Cleanup(func() { _ = backend.db.Close() })
+	}
+
+	policy := ImageAccountRoutingPolicy{
+		Enabled:             true,
+		SortMode:            "name",
+		GroupSize:           6,
+		EnabledGroupIndexes: []int{0, 2},
+		ReserveMode:         "daily_first_seen_percent",
+		ReservePercent:      15,
+	}
+	if err := store.SaveImageRoutingPolicy(policy); err != nil {
+		t.Fatalf("SaveImageRoutingPolicy(sqlite) returned error: %v", err)
+	}
+
+	reloaded, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore(sqlite reload) returned error: %v", err)
+	}
+	if backend, ok := reloaded.storage().(*sqliteAccountStorage); ok {
+		t.Cleanup(func() { _ = backend.db.Close() })
+	}
+	got, err := reloaded.GetImageRoutingPolicy()
+	if err != nil {
+		t.Fatalf("GetImageRoutingPolicy(sqlite) returned error: %v", err)
+	}
+	if !got.Enabled || got.SortMode != "name" || got.GroupSize != 6 || got.ReservePercent != 15 {
+		t.Fatalf("sqlite persisted policy = %#v", got)
+	}
+	if len(got.EnabledGroupIndexes) != 2 || got.EnabledGroupIndexes[0] != 0 || got.EnabledGroupIndexes[1] != 2 {
+		t.Fatalf("sqlite persisted group indexes = %#v", got.EnabledGroupIndexes)
+	}
+}
+
+func TestImageRoutingPolicyPersistsInRedisBackend(t *testing.T) {
+	rootDir := t.TempDir()
+	cfg := config.New(rootDir)
+	cfg.Storage.Backend = "redis"
+	cfg.Storage.AuthDir = "data/auths"
+	cfg.Storage.StateFile = "data/accounts_state.json"
+	cfg.Storage.SyncStateDir = "data/sync_state"
+	cfg.Storage.RedisAddr = "127.0.0.1:6379"
+	cfg.Storage.RedisPassword = "123456"
+	cfg.Storage.RedisDB = 0
+	cfg.Storage.RedisPrefix = "chatgpt2api:studio:test:policy:" + strings.ReplaceAll(rootDir, "\\", ":")
+	cfg.Accounts.DefaultQuota = 5
+	cfg.Accounts.RefreshWorkers = 1
+	cfg.Sync.ProviderType = "codex"
+
+	backend, err := newAccountStorageBackend(cfg, "", "", "", cfg.Sync.ProviderType)
+	if err != nil {
+		t.Fatalf("newAccountStorageBackend(redis) returned error: %v", err)
+	}
+	if err := backend.Init(); err != nil {
+		t.Skipf("redis backend is not reachable: %v", err)
+	}
+
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore(redis) returned error: %v", err)
+	}
+
+	policy := ImageAccountRoutingPolicy{
+		Enabled:             true,
+		SortMode:            "imported_at",
+		GroupSize:           9,
+		EnabledGroupIndexes: []int{2, 4},
+		ReserveMode:         "daily_first_seen_percent",
+		ReservePercent:      30,
+	}
+	if err := store.SaveImageRoutingPolicy(policy); err != nil {
+		t.Fatalf("SaveImageRoutingPolicy(redis) returned error: %v", err)
+	}
+
+	reloaded, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore(redis reload) returned error: %v", err)
+	}
+	got, err := reloaded.GetImageRoutingPolicy()
+	if err != nil {
+		t.Fatalf("GetImageRoutingPolicy(redis) returned error: %v", err)
+	}
+	if !got.Enabled || got.SortMode != "imported_at" || got.GroupSize != 9 || got.ReservePercent != 30 {
+		t.Fatalf("redis persisted policy = %#v", got)
+	}
+	if len(got.EnabledGroupIndexes) != 2 || got.EnabledGroupIndexes[0] != 2 || got.EnabledGroupIndexes[1] != 4 {
+		t.Fatalf("redis persisted group indexes = %#v", got.EnabledGroupIndexes)
+	}
+}

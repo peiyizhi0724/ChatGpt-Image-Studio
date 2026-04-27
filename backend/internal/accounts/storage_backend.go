@@ -24,6 +24,8 @@ type accountStorageBackend interface {
 	SaveSyncState(state SyncState) error
 	DeleteSyncState(name string) error
 	EnsureSyncStateInitialized(auths []LocalAuth) error
+	LoadImageRoutingPolicy() (*ImageAccountRoutingPolicy, error)
+	SaveImageRoutingPolicy(policy ImageAccountRoutingPolicy) error
 }
 
 func newAccountStorageBackend(cfg *config.Config, authDir, stateFile, syncStateDir, providerType string) (accountStorageBackend, error) {
@@ -219,6 +221,16 @@ func cloneBackendData(source, target accountStorageBackend) error {
 			return err
 		}
 	}
+
+	policy, err := source.LoadImageRoutingPolicy()
+	if err != nil {
+		return err
+	}
+	if policy != nil {
+		if err := target.SaveImageRoutingPolicy(*policy); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -383,6 +395,26 @@ func (s *fileAccountStorage) EnsureSyncStateInitialized(auths []LocalAuth) error
 		}
 	}
 	return os.WriteFile(flag, []byte(time.Now().Format(time.RFC3339)), 0o644)
+}
+
+func (s *fileAccountStorage) LoadImageRoutingPolicy() (*ImageAccountRoutingPolicy, error) {
+	path := s.imageRoutingPolicyFile()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, nil
+	}
+	var policy ImageAccountRoutingPolicy
+	if err := readJSONFile(path, &policy); err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+func (s *fileAccountStorage) SaveImageRoutingPolicy(policy ImageAccountRoutingPolicy) error {
+	return writeJSONFile(s.imageRoutingPolicyFile(), policy)
+}
+
+func (s *fileAccountStorage) imageRoutingPolicyFile() string {
+	return filepath.Join(filepath.Dir(s.stateFile), "image_account_policy.json")
 }
 
 func (s *Store) saveAuthData(name string, data map[string]any) error {

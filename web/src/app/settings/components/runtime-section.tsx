@@ -133,8 +133,8 @@ export function RuntimeSection({ config, setSection }: RuntimeSectionProps) {
         />
       </Field>
       <Field
-        label="图片排队超时（秒）"
-        hint="排队等待超过这个时间后，请求会直接返回超时。"
+        label="图片准入排队超时（秒）"
+        hint="超出并发上限后，在 admission 队列里等待超过这个时间，请求会直接返回超时。"
       >
         <Input
           type="number"
@@ -145,6 +145,79 @@ export function RuntimeSection({ config, setSection }: RuntimeSectionProps) {
               imageQueueTimeoutSeconds: Number(event.target.value || 0),
             })
           }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+      <Field
+        label="任务队列过期（秒）"
+        hint="任务创建后如果一直没有真正开跑，超过这个时间会在工作台里标记为已过期。建议明显大于准入排队超时。"
+      >
+        <Input
+          type="number"
+          value={String(config.server.imageTaskQueueTtlSeconds)}
+          onChange={(event) =>
+            setSection("server", {
+              ...config.server,
+              imageTaskQueueTtlSeconds: Number(event.target.value || 0),
+            })
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+      <Field
+        label="UI 登录密钥"
+        hint="账号管理、配置管理、调用请求页面使用的 Bearer 密钥。"
+        tooltip={
+          <TooltipDetails
+            items={[
+              {
+                title: "填写示例",
+                body: <>建议填一个你自己定义的长随机串，不要继续使用默认弱口令。</>,
+              },
+              {
+                title: "作用",
+                body: <>进入管理页面时会校验这个 Bearer 密钥；它保护的是后台管理，不是图片 API。</>,
+              },
+              {
+                title: "改完影响",
+                body: <>保存后新请求就会按新密钥校验，旧页面可能需要重新登录。</>,
+              },
+            ]}
+          />
+        }
+      >
+        <Input
+          type="password"
+          value={config.app.authKey}
+          onChange={(event) => setSection("app", { ...config.app, authKey: event.target.value })}
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+      <Field
+        label="图片 API Key 列表"
+        hint="用于调用当前项目图片接口的 Bearer key，多个可逗号分隔。"
+        tooltip={
+          <TooltipDetails
+            items={[
+              {
+                title: "格式",
+                body: <>支持多个 key，用英文逗号分隔，例如 `key-a,key-b,key-c`。</>,
+              },
+              {
+                title: "作用",
+                body: <>调用当前项目对外暴露的图片 API 时，会校验请求头里的 Bearer token 是否命中这里。</>,
+              },
+              {
+                title: "留空效果",
+                body: <>留空时图片 API 不做鉴权，任何人都能调，公网环境下不建议这么配。</>,
+              },
+            ]}
+          />
+        }
+      >
+        <Input
+          value={config.app.apiKey}
+          onChange={(event) => setSection("app", { ...config.app, apiKey: event.target.value })}
           className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
         />
       </Field>
@@ -413,66 +486,6 @@ export function RuntimeSection({ config, setSection }: RuntimeSectionProps) {
             setSection("accounts", {
               ...config.accounts,
               refreshWorkers: Number(event.target.value || 0),
-            })
-          }
-          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
-        />
-      </Field>
-      <ToggleField
-        label="自动定时刷新额度"
-        hint="后端会按设定周期自动刷新全部账号的图片额度与状态。"
-        tooltip={
-          <TooltipDetails
-            items={[
-              {
-                title: "开启后",
-                body: <>服务会在后台按周期刷新全部账号，不需要手动一页页勾选。</>,
-              },
-              {
-                title: "适合场景",
-                body: <>账号很多、经常跨页管理时，建议开启，图片工作台和账号页的额度会更稳定。</>,
-              },
-              {
-                title: "注意",
-                body: <>这是后台定时任务，不需要页面保持打开；刷新频率越高，对上游请求也越频繁。</>,
-              },
-            ]}
-          />
-        }
-        checked={config.accounts.autoRefreshEnabled}
-        onCheckedChange={(checked) =>
-          setSection("accounts", {
-            ...config.accounts,
-            autoRefreshEnabled: checked,
-          })
-        }
-      />
-      <Field
-        label="自动刷新间隔（分钟）"
-        hint="后台定时刷新额度的执行周期。"
-        tooltip={
-          <TooltipDetails
-            items={[
-              {
-                title: "建议值",
-                body: <>常用 `15`、`30`、`60` 分钟；账号越多，越建议保守一些。</>,
-              },
-              {
-                title: "设置过小",
-                body: <>会更频繁请求上游，虽然额度更实时，但也更容易增加波动和额外开销。</>,
-              },
-            ]}
-          />
-        }
-      >
-        <Input
-          type="number"
-          min="1"
-          value={String(config.accounts.autoRefreshInterval)}
-          onChange={(event) =>
-            setSection("accounts", {
-              ...config.accounts,
-              autoRefreshInterval: Number(event.target.value || 0),
             })
           }
           className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"

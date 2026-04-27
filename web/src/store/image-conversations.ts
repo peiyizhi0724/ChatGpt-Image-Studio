@@ -2,7 +2,12 @@
 
 import localforage from "localforage";
 
-import { fetchConfig, type ImageModel, type ImageQuality } from "@/lib/api";
+import {
+  fetchConfig,
+  type ImageModel,
+  type ImageQuality,
+  type InpaintSourceReference,
+} from "@/lib/api";
 import webConfig from "@/constants/common-env";
 import { httpRequest } from "@/lib/request";
 
@@ -30,7 +35,13 @@ export type StoredImage = {
   error?: string;
 };
 
-export type ImageConversationStatus = "generating" | "success" | "error";
+export type ImageConversationStatus =
+  | "queued"
+  | "running"
+  | "generating"
+  | "success"
+  | "error"
+  | "cancelled";
 
 export type ImageConversationTurn = {
   id: string;
@@ -43,10 +54,19 @@ export type ImageConversationTurn = {
   quality?: ImageQuality;
   scale?: string;
   sourceImages?: StoredSourceImage[];
+  sourceReference?: InpaintSourceReference;
   images: StoredImage[];
   createdAt: string;
   status: ImageConversationStatus;
   error?: string;
+  taskId?: string;
+  queuePosition?: number;
+  waitingReason?: string;
+  waitingDetail?: string;
+  waitingSince?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  cancelRequested?: boolean;
 };
 
 export type ImageConversation = {
@@ -300,7 +320,40 @@ function normalizeTurn(turn: ImageConversationTurn): ImageConversationTurn {
     mode: normalizeImageMode(turn.mode),
     quality: normalizeImageQuality(turn.quality),
     sourceImages: Array.isArray(turn.sourceImages) ? turn.sourceImages : [],
+    sourceReference: normalizeSourceReference(turn.sourceReference),
     images: (turn.images || []).map(normalizeStoredImage),
+    status:
+      turn.status === "queued" ||
+      turn.status === "running" ||
+      turn.status === "generating" ||
+      turn.status === "success" ||
+      turn.status === "error" ||
+      turn.status === "cancelled"
+        ? turn.status
+        : "success",
+  };
+}
+
+function normalizeSourceReference(
+  value: ImageConversationTurn["sourceReference"],
+): InpaintSourceReference | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const originalFileID = String(value.original_file_id || "").trim();
+  const originalGenID = String(value.original_gen_id || "").trim();
+  const sourceAccountID = String(value.source_account_id || "").trim();
+  if (!originalFileID || !originalGenID || !sourceAccountID) {
+    return undefined;
+  }
+  const conversationID = String(value.conversation_id || "").trim();
+  const parentMessageID = String(value.parent_message_id || "").trim();
+  return {
+    original_file_id: originalFileID,
+    original_gen_id: originalGenID,
+    conversation_id: conversationID || undefined,
+    parent_message_id: parentMessageID || undefined,
+    source_account_id: sourceAccountID,
   };
 }
 

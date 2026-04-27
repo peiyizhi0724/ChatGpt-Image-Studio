@@ -35,7 +35,7 @@ export type ImageAccountGroupPreview = {
   averageRemaining: number;
 };
 
-const STORAGE_KEY = "studio.image-account-policy.v1";
+const UI_COLLAPSED_KEY = "studio.image-account-policy.collapsed.v1";
 
 const defaultPolicy: StoredImageAccountPolicy = {
   enabled: false,
@@ -84,30 +84,26 @@ export function getDefaultImageAccountPolicy() {
   return { ...defaultPolicy };
 }
 
-export function getStoredImageAccountPolicy() {
+export function getImageAccountPolicyCollapsed() {
   if (typeof window === "undefined") {
-    return getDefaultImageAccountPolicy();
+    return false;
   }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return getDefaultImageAccountPolicy();
-    }
-    const parsed = JSON.parse(raw) as Partial<StoredImageAccountPolicy>;
-    return normalizeImageAccountPolicy(parsed);
+    return window.localStorage.getItem(UI_COLLAPSED_KEY) === "1";
   } catch {
-    return getDefaultImageAccountPolicy();
+    return false;
   }
 }
 
-export function setStoredImageAccountPolicy(policy: StoredImageAccountPolicy) {
+export function setImageAccountPolicyCollapsed(value: boolean) {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(normalizeImageAccountPolicy(policy)),
-  );
+  try {
+    window.localStorage.setItem(UI_COLLAPSED_KEY, value ? "1" : "0");
+  } catch {
+    // ignore localStorage failures
+  }
 }
 
 export function getEffectiveImageAccountPolicy(
@@ -137,9 +133,11 @@ function encodeBase64Url(raw: string) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-export function buildImageAccountPolicyHeader(policy = getStoredImageAccountPolicy()) {
+export function buildImageAccountPolicyHeader(
+  policy = getDefaultImageAccountPolicy(),
+) {
   const effectivePolicy = getEffectiveImageAccountPolicy(policy);
-  if (!effectivePolicy.enabled) {
+  if (!effectivePolicy.enabled || effectivePolicy.enabledGroupIndexes.length === 0) {
     return "";
   }
   return encodeBase64Url(JSON.stringify(effectivePolicy));
@@ -221,4 +219,57 @@ export function buildImageAccountGroupPreviews(
   }
 
   return groups;
+}
+
+function isPaidCapableAccount(account: ImagePolicyAccountLike) {
+  const type = String((account as { type?: string }).type || "").trim();
+  return type === "Plus" || type === "Pro" || type === "Team";
+}
+
+export function buildRequestImageAccountPolicy(
+  policy: StoredImageAccountPolicy,
+  groups: ImageAccountGroupPreview[],
+  options: {
+    requirePaidAccount?: boolean;
+  } = {},
+) {
+  const normalized = normalizeImageAccountPolicy(policy);
+  if (!normalized.enabled) {
+    return normalized;
+  }
+
+  const availableGroupIndexes = groups.map((group) => group.index);
+  let effectiveIndexes = normalized.enabledGroupIndexes.filter((index) =>
+    availableGroupIndexes.includes(index),
+  );
+
+  if (
+    effectiveIndexes.length === 0 &&
+    normalized.enabledGroupIndexes.length > 0 &&
+    availableGroupIndexes.length > 0
+  ) {
+    effectiveIndexes = [...availableGroupIndexes];
+  }
+
+  if (options.requirePaidAccount) {
+    const paidGroupIndexes = groups
+      .filter((group) => group.accounts.some(isPaidCapableAccount))
+      .map((group) => group.index);
+    const selectedPaidIndexes = effectiveIndexes.filter((index) =>
+      paidGroupIndexes.includes(index),
+    );
+    if (selectedPaidIndexes.length > 0) {
+      effectiveIndexes = selectedPaidIndexes;
+    } else if (paidGroupIndexes.length > 0) {
+      effectiveIndexes = [...paidGroupIndexes];
+    } else {
+      effectiveIndexes = [];
+    }
+  }
+
+  return {
+    ...normalized,
+    enabled: normalized.enabled && effectiveIndexes.length > 0,
+    enabledGroupIndexes: effectiveIndexes,
+  };
 }

@@ -2,7 +2,7 @@
 
 [app]
 name = "Cheilins Studio"
-version = "1.2.6"
+version = "1.2.9"
 api_key = ""
 auth_key = "chatgpt2api"
 image_format = "url"
@@ -15,6 +15,7 @@ static_dir = "static"
 max_image_concurrency = 8
 image_queue_limit = 32
 image_queue_timeout_seconds = 20
+image_task_queue_ttl_seconds = 600
 
 [chatgpt]
 model = "gpt-image-2"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowUp, Brush, ChevronDown, LoaderCircle, Redo2, Trash2, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -117,6 +117,12 @@ export function ImageEditModal({
   const [isPromptExpanded, setIsPromptExpanded] = useState(false);
 
   const hasSelection = strokes.length > 0;
+  const requestClose = useCallback(() => {
+    if (isSubmitting) {
+      return;
+    }
+    onClose();
+  }, [isSubmitting, onClose]);
 
   useEffect(() => {
     if (!open) {
@@ -254,6 +260,25 @@ export function ImageEditModal({
       setBrushCursor(null);
     }
   }, [selectionMode]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      requestClose();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, requestClose]);
 
   const mapClientPoint = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -451,13 +476,19 @@ export function ImageEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden overscroll-none bg-white/95 backdrop-blur-sm">
-      <div className="flex h-full flex-col touch-auto">
+    <div
+      className="fixed inset-0 z-50 overflow-hidden overscroll-none bg-white/95 backdrop-blur-sm"
+      onClick={requestClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="选区编辑"
+    >
+      <div className="flex h-full flex-col touch-auto" onClick={(event) => event.stopPropagation()}>
         <header className="border-b border-stone-200 px-4 py-3 sm:px-5 sm:py-4">
           <div className="hide-scrollbar flex items-center gap-2 overflow-x-auto">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
             >
               <X className="size-5" />

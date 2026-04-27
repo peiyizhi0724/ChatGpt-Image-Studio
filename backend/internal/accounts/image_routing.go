@@ -23,6 +23,17 @@ type ImageAccountRoutingDecision struct {
 	ReservePercent int
 }
 
+func defaultImageAccountRoutingPolicy() ImageAccountRoutingPolicy {
+	return ImageAccountRoutingPolicy{
+		Enabled:             false,
+		SortMode:            "imported_at",
+		GroupSize:           10,
+		EnabledGroupIndexes: []int{0, 1},
+		ReserveMode:         "daily_first_seen_percent",
+		ReservePercent:      20,
+	}
+}
+
 type imageRoutingCandidate struct {
 	auth    LocalAuth
 	account PublicAccount
@@ -92,6 +103,186 @@ func (s *Store) ImageAccountAllowedForPolicy(accessToken string, account PublicA
 	return s.accountAboveReserveLocked(auth.Name, account, policy.Normalize())
 }
 
+func (s *Store) CountAvailableImageAuthLeaseCandidatesWithPolicyFilteredWithDisabledOption(
+	allow func(PublicAccount) bool,
+	allowDisabled bool,
+	policy *ImageAccountRoutingPolicy,
+) (int, error) {
+	if policy == nil || !policy.Enabled {
+		return s.countAvailableImageAuthLeaseCandidates(allow, allowDisabled)
+	}
+
+	localAuths, err := s.loadAuths()
+	if err != nil {
+		return 0, err
+	}
+	syncStates := s.loadAllSyncStates()
+	now := time.Now()
+	normalizedPolicy := policy.Normalize()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	allAccounts := make([]imageRoutingCandidate, 0, len(localAuths))
+	for _, auth := range localAuths {
+		if auth.AccessToken == "" || !s.matchesProvider(auth.Provider) {
+			continue
+		}
+		account := s.buildPublicAccount(auth, syncStates[auth.Name], nil)
+		allAccounts = append(allAccounts, imageRoutingCandidate{
+			auth:    auth,
+			account: account,
+			ready:   isUsableImageAccount(account, allowDisabled),
+		})
+	}
+	if len(allAccounts) == 0 {
+		return 0, nil
+	}
+
+	sortRoutingCandidates(allAccounts, normalizedPolicy.SortMode)
+
+	groupCount := 0
+	if normalizedPolicy.GroupSize > 0 {
+		groupCount = int(math.Ceil(float64(len(allAccounts)) / float64(normalizedPolicy.GroupSize)))
+	}
+
+	selectedGroupIndexes := make([]int, 0, len(normalizedPolicy.EnabledGroupIndexes))
+	for _, groupIndex := range normalizedPolicy.EnabledGroupIndexes {
+		if groupIndex < 0 || groupIndex >= groupCount {
+			continue
+		}
+		selectedGroupIndexes = append(selectedGroupIndexes, groupIndex)
+	}
+	if len(selectedGroupIndexes) == 0 && len(normalizedPolicy.EnabledGroupIndexes) > 0 && groupCount > 0 {
+		selectedGroupIndexes = make([]int, groupCount)
+		for index := range selectedGroupIndexes {
+			selectedGroupIndexes[index] = index
+		}
+	}
+
+	count := s.countImageRoutingCandidatesFromGroups(
+		allAccounts,
+		selectedGroupIndexes,
+		normalizedPolicy,
+		allow,
+		allowDisabled,
+		now,
+	)
+	if count > 0 {
+		return count, nil
+	}
+
+	if allow != nil && len(selectedGroupIndexes) > 0 {
+		allGroupIndexes := make([]int, groupCount)
+		for index := range allGroupIndexes {
+			allGroupIndexes[index] = index
+		}
+		return s.countImageRoutingCandidatesFromGroups(
+			allAccounts,
+			allGroupIndexes,
+			normalizedPolicy,
+			allow,
+			allowDisabled,
+			now,
+		), nil
+	}
+
+	return 0, nil
+}
+
+func (s *Store) CountPotentialImageAuthCandidatesWithPolicyFilteredWithDisabledOption(
+	allow func(PublicAccount) bool,
+	allowDisabled bool,
+	policy *ImageAccountRoutingPolicy,
+) (int, error) {
+	if policy == nil || !policy.Enabled {
+		return s.countPotentialImageAuthCandidates(allow, allowDisabled)
+	}
+
+	localAuths, err := s.loadAuths()
+	if err != nil {
+		return 0, err
+	}
+	syncStates := s.loadAllSyncStates()
+	now := time.Now()
+	normalizedPolicy := policy.Normalize()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	allAccounts := make([]imageRoutingCandidate, 0, len(localAuths))
+	for _, auth := range localAuths {
+		if auth.AccessToken == "" || !s.matchesProvider(auth.Provider) {
+			continue
+		}
+		account := s.buildPublicAccount(auth, syncStates[auth.Name], nil)
+		allAccounts = append(allAccounts, imageRoutingCandidate{
+			auth:    auth,
+			account: account,
+			ready:   isUsableImageAccount(account, allowDisabled),
+		})
+	}
+	if len(allAccounts) == 0 {
+		return 0, nil
+	}
+
+	sortRoutingCandidates(allAccounts, normalizedPolicy.SortMode)
+
+	groupCount := 0
+	if normalizedPolicy.GroupSize > 0 {
+		groupCount = int(math.Ceil(float64(len(allAccounts)) / float64(normalizedPolicy.GroupSize)))
+	}
+
+	selectedGroupIndexes := make([]int, 0, len(normalizedPolicy.EnabledGroupIndexes))
+	for _, groupIndex := range normalizedPolicy.EnabledGroupIndexes {
+		if groupIndex < 0 || groupIndex >= groupCount {
+			continue
+		}
+		selectedGroupIndexes = append(selectedGroupIndexes, groupIndex)
+	}
+	if len(selectedGroupIndexes) == 0 && len(normalizedPolicy.EnabledGroupIndexes) > 0 && groupCount > 0 {
+		selectedGroupIndexes = make([]int, groupCount)
+		for index := range selectedGroupIndexes {
+			selectedGroupIndexes[index] = index
+		}
+	}
+	if len(selectedGroupIndexes) == 0 && len(normalizedPolicy.EnabledGroupIndexes) == 0 && groupCount > 0 {
+		selectedGroupIndexes = make([]int, groupCount)
+		for index := range selectedGroupIndexes {
+			selectedGroupIndexes[index] = index
+		}
+	}
+
+	count := s.countPotentialImageRoutingCandidatesFromGroups(
+		allAccounts,
+		selectedGroupIndexes,
+		normalizedPolicy,
+		allow,
+		allowDisabled,
+		now,
+	)
+	if count > 0 {
+		return count, nil
+	}
+
+	if allow != nil && len(selectedGroupIndexes) > 0 {
+		allGroupIndexes := make([]int, groupCount)
+		for index := range allGroupIndexes {
+			allGroupIndexes[index] = index
+		}
+		return s.countPotentialImageRoutingCandidatesFromGroups(
+			allAccounts,
+			allGroupIndexes,
+			normalizedPolicy,
+			allow,
+			allowDisabled,
+			now,
+		), nil
+	}
+
+	return 0, nil
+}
+
 func (s *Store) acquireImageAuthWithPolicyLease(
 	excluded map[string]struct{},
 	allow func(PublicAccount) bool,
@@ -120,9 +311,6 @@ func (s *Store) acquireImageAuthWithPolicyLease(
 			continue
 		}
 		account := s.buildPublicAccount(auth, syncStates[auth.Name], nil)
-		if allow != nil && !allow(account) {
-			continue
-		}
 		allAccounts = append(allAccounts, imageRoutingCandidate{
 			auth:    auth,
 			account: account,
@@ -135,8 +323,74 @@ func (s *Store) acquireImageAuthWithPolicyLease(
 
 	sortRoutingCandidates(allAccounts, normalizedPolicy.SortMode)
 
-	sawSelectedGroup := false
+	groupCount := 0
+	if normalizedPolicy.GroupSize > 0 {
+		groupCount = int(math.Ceil(float64(len(allAccounts)) / float64(normalizedPolicy.GroupSize)))
+	}
+
+	selectedGroupIndexes := make([]int, 0, len(normalizedPolicy.EnabledGroupIndexes))
 	for _, groupIndex := range normalizedPolicy.EnabledGroupIndexes {
+		if groupIndex < 0 || groupIndex >= groupCount {
+			continue
+		}
+		selectedGroupIndexes = append(selectedGroupIndexes, groupIndex)
+	}
+	if len(selectedGroupIndexes) == 0 && len(normalizedPolicy.EnabledGroupIndexes) > 0 && groupCount > 0 {
+		selectedGroupIndexes = make([]int, groupCount)
+		for index := range selectedGroupIndexes {
+			selectedGroupIndexes[index] = index
+		}
+	}
+
+	auth, account, decision, release, ok := s.selectImageRoutingCandidateFromGroups(
+		allAccounts,
+		selectedGroupIndexes,
+		normalizedPolicy,
+		excluded,
+		allow,
+		allowDisabled,
+		now,
+	)
+	if ok {
+		return auth, account, decision, release, nil
+	}
+
+	if allow != nil && len(selectedGroupIndexes) > 0 {
+		allGroupIndexes := make([]int, groupCount)
+		for index := range allGroupIndexes {
+			allGroupIndexes[index] = index
+		}
+		auth, account, _, release, ok = s.selectImageRoutingCandidateFromGroups(
+			allAccounts,
+			allGroupIndexes,
+			normalizedPolicy,
+			excluded,
+			allow,
+			allowDisabled,
+			now,
+		)
+		if ok {
+			return auth, account, ImageAccountRoutingDecision{}, release, nil
+		}
+	}
+
+	if len(selectedGroupIndexes) > 0 || len(normalizedPolicy.EnabledGroupIndexes) > 0 {
+		return nil, PublicAccount{}, ImageAccountRoutingDecision{}, nil, ErrSelectedImageGroupsExhausted
+	}
+	return nil, PublicAccount{}, ImageAccountRoutingDecision{}, nil, ErrNoAvailableImageAuth
+}
+
+func (s *Store) selectImageRoutingCandidateFromGroups(
+	allAccounts []imageRoutingCandidate,
+	groupIndexes []int,
+	normalizedPolicy ImageAccountRoutingPolicy,
+	excluded map[string]struct{},
+	allow func(PublicAccount) bool,
+	allowDisabled bool,
+	now time.Time,
+) (*LocalAuth, PublicAccount, ImageAccountRoutingDecision, func(), bool) {
+	sawSelectedGroup := false
+	for _, groupIndex := range groupIndexes {
 		groupStart := groupIndex * normalizedPolicy.GroupSize
 		if groupStart >= len(allAccounts) {
 			continue
@@ -146,6 +400,9 @@ func (s *Store) acquireImageAuthWithPolicyLease(
 		groupEnd := minInt(len(allAccounts), groupStart+normalizedPolicy.GroupSize)
 		groupCandidates := make([]imageRoutingCandidate, 0, groupEnd-groupStart)
 		for _, candidate := range allAccounts[groupStart:groupEnd] {
+			if allow != nil && !allow(candidate.account) {
+				continue
+			}
 			if _, blocked := excluded[candidate.auth.AccessToken]; blocked {
 				continue
 			}
@@ -191,20 +448,176 @@ func (s *Store) acquireImageAuthWithPolicyLease(
 		selected := groupCandidates[0]
 		release, leaseErr := s.acquireImageLeaseLocked(selected.auth.AccessToken)
 		if leaseErr != nil {
-			return nil, PublicAccount{}, ImageAccountRoutingDecision{}, nil, leaseErr
+			continue
 		}
 		return &selected.auth, selected.account, ImageAccountRoutingDecision{
 			PolicyApplied:  true,
 			GroupIndex:     groupIndex,
 			SortMode:       normalizedPolicy.SortMode,
 			ReservePercent: normalizedPolicy.ReservePercent,
-		}, release, nil
+		}, release, true
 	}
 
-	if sawSelectedGroup || len(normalizedPolicy.EnabledGroupIndexes) > 0 {
-		return nil, PublicAccount{}, ImageAccountRoutingDecision{}, nil, ErrSelectedImageGroupsExhausted
+	_ = sawSelectedGroup
+	return nil, PublicAccount{}, ImageAccountRoutingDecision{}, nil, false
+}
+
+func (s *Store) countAvailableImageAuthLeaseCandidates(
+	allow func(PublicAccount) bool,
+	allowDisabled bool,
+) (int, error) {
+	localAuths, err := s.loadAuths()
+	if err != nil {
+		return 0, err
 	}
-	return nil, PublicAccount{}, ImageAccountRoutingDecision{}, nil, ErrNoAvailableImageAuth
+	syncStates := s.loadAllSyncStates()
+	now := time.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for _, auth := range localAuths {
+		account := s.buildPublicAccount(auth, syncStates[auth.Name], nil)
+		if s.isImageLeasedLocked(auth.AccessToken) {
+			continue
+		}
+		if allow != nil && !allow(account) {
+			continue
+		}
+		ready := isUsableImageAccount(account, allowDisabled)
+		refreshNeeded := NeedsImageQuotaRefresh(account, now)
+		if auth.AccessToken == "" ||
+			(auth.Disabled && !allowDisabled) ||
+			(account.Status == "禁用" && !allowDisabled) ||
+			account.Status == "异常" ||
+			(!ready && !refreshNeeded) {
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (s *Store) countPotentialImageAuthCandidates(
+	allow func(PublicAccount) bool,
+	allowDisabled bool,
+) (int, error) {
+	localAuths, err := s.loadAuths()
+	if err != nil {
+		return 0, err
+	}
+	syncStates := s.loadAllSyncStates()
+	now := time.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for _, auth := range localAuths {
+		account := s.buildPublicAccount(auth, syncStates[auth.Name], nil)
+		if allow != nil && !allow(account) {
+			continue
+		}
+		ready := isUsableImageAccount(account, allowDisabled)
+		refreshNeeded := NeedsImageQuotaRefreshWithTTL(account, now, s.cfg.ImageQuotaRefreshTTL())
+		if auth.AccessToken == "" ||
+			(auth.Disabled && !allowDisabled) ||
+			(account.Status == "禁用" && !allowDisabled) ||
+			account.Status == "异常" ||
+			(!ready && !refreshNeeded) {
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (s *Store) countImageRoutingCandidatesFromGroups(
+	allAccounts []imageRoutingCandidate,
+	groupIndexes []int,
+	normalizedPolicy ImageAccountRoutingPolicy,
+	allow func(PublicAccount) bool,
+	allowDisabled bool,
+	now time.Time,
+) int {
+	count := 0
+	for _, groupIndex := range groupIndexes {
+		groupStart := groupIndex * normalizedPolicy.GroupSize
+		if groupStart >= len(allAccounts) {
+			continue
+		}
+
+		groupEnd := minInt(len(allAccounts), groupStart+normalizedPolicy.GroupSize)
+		for _, candidate := range allAccounts[groupStart:groupEnd] {
+			if allow != nil && !allow(candidate.account) {
+				continue
+			}
+			if s.isImageLeasedLocked(candidate.auth.AccessToken) {
+				continue
+			}
+			refreshNeeded := NeedsImageQuotaRefreshWithTTL(candidate.account, now, s.cfg.ImageQuotaRefreshTTL())
+			if candidate.auth.Disabled && !allowDisabled {
+				continue
+			}
+			if candidate.account.Status == "禁用" && !allowDisabled {
+				continue
+			}
+			if candidate.account.Status == "异常" {
+				continue
+			}
+			if !candidate.ready && !refreshNeeded {
+				continue
+			}
+			if candidate.ready && !s.accountAboveReserveLocked(candidate.auth.Name, candidate.account, normalizedPolicy) {
+				continue
+			}
+			count++
+		}
+	}
+	return count
+}
+
+func (s *Store) countPotentialImageRoutingCandidatesFromGroups(
+	allAccounts []imageRoutingCandidate,
+	groupIndexes []int,
+	normalizedPolicy ImageAccountRoutingPolicy,
+	allow func(PublicAccount) bool,
+	allowDisabled bool,
+	now time.Time,
+) int {
+	count := 0
+	for _, groupIndex := range groupIndexes {
+		groupStart := groupIndex * normalizedPolicy.GroupSize
+		if groupStart >= len(allAccounts) {
+			continue
+		}
+
+		groupEnd := minInt(len(allAccounts), groupStart+normalizedPolicy.GroupSize)
+		for _, candidate := range allAccounts[groupStart:groupEnd] {
+			if allow != nil && !allow(candidate.account) {
+				continue
+			}
+			refreshNeeded := NeedsImageQuotaRefreshWithTTL(candidate.account, now, s.cfg.ImageQuotaRefreshTTL())
+			if candidate.auth.Disabled && !allowDisabled {
+				continue
+			}
+			if candidate.account.Status == "禁用" && !allowDisabled {
+				continue
+			}
+			if candidate.account.Status == "异常" {
+				continue
+			}
+			if !candidate.ready && !refreshNeeded {
+				continue
+			}
+			if candidate.ready && !s.accountAboveReserveLocked(candidate.auth.Name, candidate.account, normalizedPolicy) {
+				continue
+			}
+			count++
+		}
+	}
+	return count
 }
 
 func sortRoutingCandidates(candidates []imageRoutingCandidate, sortMode string) {

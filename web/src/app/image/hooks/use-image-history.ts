@@ -10,7 +10,6 @@ import {
   listImageConversations,
   type ImageConversation,
 } from "@/store/image-conversations";
-import { listActiveImageTasks } from "@/store/image-active-tasks";
 
 type UseImageHistoryOptions = {
   normalizeHistory: (
@@ -18,17 +17,16 @@ type UseImageHistoryOptions = {
   ) => Promise<ImageConversation[]>;
   mountedRef: React.RefObject<boolean>;
   draftSelectionRef: React.RefObject<boolean>;
-  syncRuntimeTaskState: (preferredConversationId?: string | null) => void;
+  activeConversationIds: Set<string>;
+  preferredActiveConversationId: string | null;
 };
 
 function mergeActiveTaskConversations(
   currentItems: ImageConversation[],
   refreshedItems: ImageConversation[],
+  activeConversationIds: Set<string>,
 ) {
   const nextById = new Map(refreshedItems.map((item) => [item.id, item]));
-  const activeConversationIds = new Set(
-    listActiveImageTasks().map((task) => task.conversationId),
-  );
 
   if (activeConversationIds.size === 0) {
     return refreshedItems;
@@ -50,7 +48,8 @@ export function useImageHistory({
   normalizeHistory,
   mountedRef,
   draftSelectionRef,
-  syncRuntimeTaskState,
+  activeConversationIds,
+  preferredActiveConversationId,
 }: UseImageHistoryOptions) {
   const cachedConversations = getCachedImageConversationsSnapshot();
   const conversationsRef = useRef<ImageConversation[]>(
@@ -83,12 +82,11 @@ export function useImageHistory({
   }, [draftSelectionRef]);
 
   const hasActiveTask = useCallback((conversationId?: string) => {
-    const tasks = listActiveImageTasks();
     if (!conversationId) {
-      return tasks.length > 0;
+      return activeConversationIds.size > 0;
     }
-    return tasks.some((task) => task.conversationId === conversationId);
-  }, []);
+    return activeConversationIds.has(conversationId);
+  }, [activeConversationIds]);
 
   const refreshHistory = useCallback(
     async (
@@ -122,6 +120,7 @@ export function useImageHistory({
         const mergedItems = mergeActiveTaskConversations(
           currentItems,
           nextItems,
+          activeConversationIds,
         );
         conversationsRef.current = mergedItems;
         setConversations(mergedItems);
@@ -132,24 +131,14 @@ export function useImageHistory({
           if (draftSelectionRef.current) {
             return null;
           }
-          const activeTaskConversationId =
-            listActiveImageTasks()[0]?.conversationId ?? null;
           if (
-            activeTaskConversationId &&
-            mergedItems.some((item) => item.id === activeTaskConversationId)
+            preferredActiveConversationId &&
+            mergedItems.some((item) => item.id === preferredActiveConversationId)
           ) {
-            return activeTaskConversationId;
+            return preferredActiveConversationId;
           }
           return mergedItems[0]?.id ?? null;
         });
-        const activeTaskConversationId =
-          listActiveImageTasks()[0]?.conversationId ?? null;
-        const preferredConversationId =
-          activeTaskConversationId &&
-          mergedItems.some((item) => item.id === activeTaskConversationId)
-            ? activeTaskConversationId
-            : (mergedItems[0]?.id ?? null);
-        syncRuntimeTaskState(preferredConversationId);
       } catch (error) {
         if (!silent && mountedRef.current) {
           const message =
@@ -162,7 +151,7 @@ export function useImageHistory({
         }
       }
     },
-    [draftSelectionRef, mountedRef, normalizeHistory, syncRuntimeTaskState],
+    [activeConversationIds, draftSelectionRef, mountedRef, normalizeHistory, preferredActiveConversationId],
   );
 
   const handleCreateDraft = useCallback(

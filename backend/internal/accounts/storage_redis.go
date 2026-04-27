@@ -155,6 +155,29 @@ func (s *redisAccountStorage) EnsureSyncStateInitialized(auths []LocalAuth) erro
 	return s.client.HSet(ctx, s.key("meta"), "sync_bootstrap", "1").Err()
 }
 
+func (s *redisAccountStorage) LoadImageRoutingPolicy() (*ImageAccountRoutingPolicy, error) {
+	raw, err := s.client.HGet(context.Background(), s.key("meta"), "image_account_policy").Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var policy ImageAccountRoutingPolicy
+	if err := json.Unmarshal([]byte(raw), &policy); err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+func (s *redisAccountStorage) SaveImageRoutingPolicy(policy ImageAccountRoutingPolicy) error {
+	raw, err := json.Marshal(policy)
+	if err != nil {
+		return err
+	}
+	return s.client.HSet(context.Background(), s.key("meta"), "image_account_policy", raw).Err()
+}
+
 func (s *redisAccountStorage) key(name string) string {
 	return s.prefix + ":" + name
 }

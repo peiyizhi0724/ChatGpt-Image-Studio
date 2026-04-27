@@ -38,9 +38,10 @@ export function createConversationTurn(payload: {
   quality?: ImageQuality;
   scale?: string;
   sourceImages?: StoredSourceImage[];
+  sourceReference?: InpaintSourceReference;
   images: StoredImage[];
   createdAt: string;
-  status: "generating" | "success" | "error";
+  status: "queued" | "running" | "generating" | "success" | "error" | "cancelled";
   error?: string;
 }): ImageConversationTurn {
   return {
@@ -54,6 +55,7 @@ export function createConversationTurn(payload: {
     quality: payload.quality,
     scale: payload.scale,
     sourceImages: payload.sourceImages ?? [],
+    sourceReference: payload.sourceReference,
     images: payload.images,
     createdAt: payload.createdAt,
     status: payload.status,

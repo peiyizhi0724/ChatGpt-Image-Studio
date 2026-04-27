@@ -240,11 +240,12 @@ docker compose up -d
 - 使用 `ghcr.io/peiyizhi0724/chatgpt-image-studio:latest`，也就是 `main` 分支当前最新镜像
 - 将宿主机的 `./backend/data` 挂载到容器内 `/app/data`
 - 对外暴露 `7000` 端口
+- 额外注入 `host.docker.internal`，方便容器访问宿主机服务（如本机代理）
 
 如需固定到某个版本，可先设置：
 
 ```bash
-export IMAGE_TAG=v1.2.8
+export IMAGE_TAG=v1.2.9
 docker compose pull
 docker compose up -d
 ```
@@ -252,7 +253,7 @@ docker compose up -d
 Windows PowerShell：
 
 ```powershell
-$env:IMAGE_TAG = "v1.2.8"
+$env:IMAGE_TAG = "v1.2.9"
 docker compose pull
 docker compose up -d
 ```
@@ -385,6 +386,19 @@ controller_group = "Proxy"
 - 为什么 `chatgpt.com` 或 `backend-api/me` 返回 `HTTP 403` 仍可能代表节点可用
 - 当前推荐的 `mihomo` 策略：`URLTest`、更多候选节点、关闭 `store-selected`
 - 当前生产环境里实际负责生成 `/etc/mihomo/config.yaml` 的脚本位置与复查命令
+
+如果你是 `Docker Compose` 部署，并且代理程序跑在宿主机上，需要注意：
+
+- 容器里的 `127.0.0.1` 指向容器自己，不是宿主机
+- 更推荐把代理写成 `socks5h://host.docker.internal:7890` 或可被容器访问到的实际地址
+- 如果报 `connect: connection refused`，通常不是项目不支持 SOCKS5，而是你的代理程序只监听了宿主机回环地址
+- 对 `Clash / mihomo / sing-box / v2rayN` 这类本机代理，通常需要开启 `Allow LAN`，或者把监听地址改为 `0.0.0.0`
+- 如果代理本身也在 Docker 里，优先直接填写代理容器的服务名和端口，而不是宿主机 IP
+
+补充说明：
+
+- `CPA` 模式很多请求是发往你配置的 `CPA base_url`，不等于官方 `Studio` 直连链路已经验证过宿主机 SOCKS 代理可达
+- `Studio` 官方链路会真实从容器内访问 `chatgpt.com`，所以宿主机代理是否对容器开放，会直接影响 `/backend-api/me` 和图片请求
 
 如果需要调整 `Free` / `Plus / Pro / Team` 账号的图片链路，可在 `[chatgpt]` 下补充：
 

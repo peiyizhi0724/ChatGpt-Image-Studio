@@ -344,6 +344,29 @@ func (s *Store) Close() error {
 	return s.backend.Close()
 }
 
+func (s *Store) GetImageRoutingPolicy() (ImageAccountRoutingPolicy, error) {
+	policy, err := s.storage().LoadImageRoutingPolicy()
+	if err != nil {
+		return ImageAccountRoutingPolicy{}, err
+	}
+	if policy == nil {
+		return defaultImageAccountRoutingPolicy(), nil
+	}
+	normalized := policy.Normalize()
+	if normalized.GroupSize <= 0 {
+		defaults := defaultImageAccountRoutingPolicy()
+		normalized.GroupSize = defaults.GroupSize
+	}
+	if normalized.ReserveMode == "" {
+		normalized.ReserveMode = defaultImageAccountRoutingPolicy().ReserveMode
+	}
+	return normalized, nil
+}
+
+func (s *Store) SaveImageRoutingPolicy(policy ImageAccountRoutingPolicy) error {
+	return s.storage().SaveImageRoutingPolicy(policy.Normalize())
+}
+
 func (s *Store) ListAccounts() ([]PublicAccount, error) {
 	localAuths, err := s.loadAuths()
 	if err != nil {
