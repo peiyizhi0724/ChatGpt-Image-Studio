@@ -7,6 +7,7 @@ DEPLOY_BRANCH="${DEPLOY_BRANCH:-production}"
 DEPLOY_REPO_URL="${DEPLOY_REPO_URL:-}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:7000/image}"
 
+mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
 echo "[deploy] app dir: $APP_DIR"
@@ -15,9 +16,22 @@ if [ -n "$DEPLOY_REPO_URL" ]; then
   echo "[deploy] target repo: $DEPLOY_REPO_URL"
 fi
 
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [ -z "$DEPLOY_REPO_URL" ]; then
+    echo "[deploy] DEPLOY_REPO_URL is required to bootstrap a missing git repo" >&2
+    exit 1
+  fi
+
+  echo "[deploy] bootstrapping git repo in $APP_DIR"
+  git init
+fi
+
+CURRENT_ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
 if [ -n "$DEPLOY_REPO_URL" ]; then
-  CURRENT_ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
-  if [ "$CURRENT_ORIGIN_URL" != "$DEPLOY_REPO_URL" ]; then
+  if [ -z "$CURRENT_ORIGIN_URL" ]; then
+    echo "[deploy] adding origin remote"
+    git remote add origin "$DEPLOY_REPO_URL"
+  elif [ "$CURRENT_ORIGIN_URL" != "$DEPLOY_REPO_URL" ]; then
     echo "[deploy] updating origin remote"
     git remote set-url origin "$DEPLOY_REPO_URL"
   fi
@@ -25,17 +39,9 @@ fi
 
 git fetch origin "$DEPLOY_BRANCH"
 
-CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$CURRENT_BRANCH" != "$DEPLOY_BRANCH" ]; then
-  if git show-ref --verify --quiet "refs/heads/$DEPLOY_BRANCH"; then
-    git checkout "$DEPLOY_BRANCH"
-  else
-    git checkout -b "$DEPLOY_BRANCH" --track "origin/$DEPLOY_BRANCH"
-  fi
-fi
-
+git checkout -B "$DEPLOY_BRANCH"
 git branch --set-upstream-to="origin/$DEPLOY_BRANCH" "$DEPLOY_BRANCH" >/dev/null 2>&1 || true
-git pull --ff-only origin "$DEPLOY_BRANCH"
+git reset --hard "origin/$DEPLOY_BRANCH"
 
 docker compose up -d --build
 

@@ -29,13 +29,12 @@ jobs:
           ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Deploy to server
+        env:
+          APP_DIR: ${{ secrets.DEPLOY_APP_DIR }}
+          DEPLOY_BRANCH: ${{ github.ref_name }}
+          DEPLOY_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
         run: |
-          ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" <<'EOF'
-            export APP_DIR='${{ secrets.DEPLOY_APP_DIR }}'
-            export DEPLOY_BRANCH='${{ github.ref_name }}'
-            export DEPLOY_REPO_URL='${{ github.server_url }}/${{ github.repository }}.git'
-            export HEALTHCHECK_URL='${{ secrets.HEALTHCHECK_URL }}'
-            cd "$APP_DIR"
-            chmod +x scripts/deploy-production.sh
-            ./scripts/deploy-production.sh
-          EOF
+          ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "APP_DIR='$APP_DIR' DEPLOY_BRANCH='$DEPLOY_BRANCH' DEPLOY_REPO_URL='$DEPLOY_REPO_URL' HEALTHCHECK_URL='$HEALTHCHECK_URL' bash -s" \
+            < scripts/deploy-production.sh
