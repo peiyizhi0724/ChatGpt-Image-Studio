@@ -279,6 +279,17 @@ mode = "fixed"
 sync_enabled = false
 ```
 
+如果你部署的是 `Studio` 官方链路，并且通过宿主机 `mihomo / clash` 给容器提供代理，建议同时阅读：
+
+- [代理运维说明](docs/PROXY_RUNBOOK.md)
+
+这份 runbook 记录了当前线上排障结论，重点包括：
+
+- 为什么 `代理端口可连接` 但官方生图仍然会 `EOF`
+- 为什么 `chatgpt.com` 或 `backend-api/me` 返回 `HTTP 403` 仍可能代表节点可用
+- 当前推荐的 `mihomo` 策略：`URLTest`、更多候选节点、关闭 `store-selected`
+- 当前生产环境里实际负责生成 `/etc/mihomo/config.yaml` 的脚本位置与复查命令
+
 如果需要调整 `Free` / `Plus / Pro / Team` 账号的图片链路，可在 `[chatgpt]` 下补充：
 
 ```toml
