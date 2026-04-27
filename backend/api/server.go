@@ -413,9 +413,13 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("POST /portal/api/register", http.HandlerFunc(s.handlePortalRegister))
 	mux.Handle("POST /portal/api/register/code", http.HandlerFunc(s.handlePortalRegisterCode))
+	mux.Handle("POST /portal/api/password/code", http.HandlerFunc(s.handlePortalPasswordCode))
+	mux.Handle("POST /portal/api/password/reset", http.HandlerFunc(s.handlePortalPasswordReset))
 	mux.Handle("POST /portal/api/login", http.HandlerFunc(s.handlePortalLogin))
 	mux.Handle("POST /portal/api/logout", s.requirePortalUser(http.HandlerFunc(s.handlePortalLogout)))
 	mux.Handle("GET /portal/api/me", s.requirePortalUser(http.HandlerFunc(s.handlePortalMe)))
+	mux.Handle("PATCH /portal/api/me/profile", s.requirePortalUser(http.HandlerFunc(s.handlePortalUpdateProfile)))
+	mux.Handle("POST /portal/api/me/password", s.requirePortalUser(http.HandlerFunc(s.handlePortalChangePassword)))
 	mux.Handle("GET /portal/api/workspace/bootstrap", s.requirePortalUser(http.HandlerFunc(s.handlePortalWorkspaceBootstrap)))
 	mux.Handle("GET /portal/api/workspace/accounts/{id}/quota", s.requirePortalUser(http.HandlerFunc(s.handlePortalAccountQuota)))
 	mux.Handle("GET /portal/api/gallery/works", s.requirePortalUser(http.HandlerFunc(s.handlePortalGalleryWorks)))

@@ -5,6 +5,7 @@ import { Copy, Download, Heart, LoaderCircle, MessageCircle, RefreshCw, Search, 
 import { toast } from "sonner";
 
 import { AppImage as Image } from "@/components/app-image";
+import { PortalAvatar } from "@/components/portal-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,6 +57,10 @@ function maskEmail(value: string) {
   const domain = email.slice(atIndex);
   const visible = name.length <= 3 ? name.slice(0, 1) : name.slice(0, 2);
   return `${visible}***${domain}`;
+}
+
+function getAuthorName(author: { user_display_name?: string; user_email: string }) {
+  return String(author.user_display_name || "").trim() || maskEmail(author.user_email);
 }
 
 async function copyText(text: string) {
@@ -239,7 +244,7 @@ export default function GalleryPage() {
                 <Input
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
-                  placeholder="搜索提示词、标题或邮箱"
+                  placeholder="搜索标题、提示词、作者昵称或邮箱"
                   className="h-11 rounded-2xl border-stone-200 bg-stone-50 pl-10"
                 />
               </div>
@@ -303,13 +308,23 @@ export default function GalleryPage() {
                         alt={work.title}
                         className="block aspect-square w-full object-cover transition duration-300 hover:scale-[1.02]"
                       />
-                      <div className="absolute top-3 left-3 rounded-full bg-white/92 px-3 py-1 text-xs font-medium text-stone-700 shadow-sm">
-                        {maskEmail(work.user_email)}
-                      </div>
                     </div>
                   </button>
 
                   <div className="space-y-3 px-4 py-4">
+                    <div className="flex items-center gap-3">
+                      <PortalAvatar
+                        src={work.user_avatar_url}
+                        name={work.user_display_name}
+                        email={work.user_email}
+                        className="size-10"
+                      />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-stone-900">{getAuthorName(work)}</div>
+                        <div className="truncate text-xs text-stone-500">{maskEmail(work.user_email)}</div>
+                      </div>
+                    </div>
+
                     <div>
                       <button type="button" className="line-clamp-1 text-left text-sm font-semibold tracking-tight text-stone-950" onClick={() => void openWork(work)}>
                         {work.title}
@@ -382,8 +397,21 @@ export default function GalleryPage() {
               <div className="flex min-h-0 flex-col border-t border-stone-100 p-6 lg:border-t-0 lg:border-l">
                 <DialogHeader className="gap-3">
                   <DialogTitle className="text-2xl tracking-tight text-stone-950">{selectedWork.title}</DialogTitle>
-                  <DialogDescription className="text-sm leading-6 text-stone-500">
-                    发布者 {maskEmail(selectedWork.user_email)} · {formatDate(selectedWork.created_at)}
+                  <DialogDescription className="not-sr-only">
+                    <span className="flex items-center gap-3 text-sm leading-6 text-stone-500">
+                      <PortalAvatar
+                        src={selectedWork.user_avatar_url}
+                        name={selectedWork.user_display_name}
+                        email={selectedWork.user_email}
+                        className="size-11"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-stone-700">{getAuthorName(selectedWork)}</span>
+                        <span className="block truncate text-xs text-stone-500">
+                          {maskEmail(selectedWork.user_email)} · {formatDate(selectedWork.created_at)}
+                        </span>
+                      </span>
+                    </span>
                   </DialogDescription>
                 </DialogHeader>
 
@@ -439,9 +467,20 @@ export default function GalleryPage() {
                       <div className="space-y-3">
                         {comments.map((comment) => (
                           <div key={comment.id} className="rounded-[20px] bg-white px-4 py-3 shadow-sm">
-                            <div className="flex items-center justify-between gap-3 text-xs text-stone-500">
-                              <span className="font-medium text-stone-700">{maskEmail(comment.user_email)}</span>
-                              <span>{formatDate(comment.created_at)}</span>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <PortalAvatar
+                                  src={comment.user_avatar_url}
+                                  name={comment.user_display_name}
+                                  email={comment.user_email}
+                                  className="size-9"
+                                />
+                                <div className="min-w-0 text-xs text-stone-500">
+                                  <div className="truncate font-medium text-stone-700">{getAuthorName(comment)}</div>
+                                  <div className="truncate">{maskEmail(comment.user_email)}</div>
+                                </div>
+                              </div>
+                              <span className="shrink-0 text-xs text-stone-500">{formatDate(comment.created_at)}</span>
                             </div>
                             <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-stone-700">
                               {comment.content}

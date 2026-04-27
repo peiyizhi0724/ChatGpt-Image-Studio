@@ -23,6 +23,7 @@ var (
 	ErrNotFound           = fmt.Errorf("user not found")
 	ErrEmailExists        = fmt.Errorf("email already exists")
 	ErrInvalidCredentials = fmt.Errorf("invalid email or password")
+	ErrCurrentPassword    = fmt.Errorf("current password is invalid")
 	ErrUserDisabled       = fmt.Errorf("user is disabled")
 	ErrLastAdminRequired  = fmt.Errorf("at least one enabled admin is required")
 )
@@ -30,6 +31,8 @@ var (
 type Record struct {
 	ID           string `json:"id"`
 	Email        string `json:"email"`
+	DisplayName  string `json:"display_name"`
+	AvatarURL    string `json:"avatar_url"`
 	PasswordHash string `json:"password_hash"`
 	Role         string `json:"role"`
 	Disabled     bool   `json:"disabled"`
@@ -40,6 +43,8 @@ type Record struct {
 type PublicUser struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
 	Role        string `json:"role"`
 	Disabled    bool   `json:"disabled"`
 	CreatedAt   string `json:"created_at"`
@@ -49,6 +54,11 @@ type PublicUser struct {
 type Update struct {
 	Role     *string
 	Disabled *bool
+}
+
+type ProfileUpdate struct {
+	DisplayName *string
+	AvatarURL   *string
 }
 
 type storageBackend interface {
@@ -119,6 +129,8 @@ func (s *Store) Register(email, password string) (PublicUser, error) {
 	record := Record{
 		ID:           uuid.NewString(),
 		Email:        normalizedEmail,
+		DisplayName:  buildDefaultDisplayName(normalizedEmail),
+		AvatarURL:    "",
 		PasswordHash: string(passwordHash),
 		Role:         role,
 		Disabled:     false,
@@ -218,6 +230,102 @@ func (s *Store) Update(id string, update Update) (PublicUser, error) {
 		return PublicUser{}, err
 	}
 	return toPublicUser(record), nil
+}
+
+func (s *Store) UpdateProfile(id string, update ProfileUpdate) (PublicUser, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.users[strings.TrimSpace(id)]
+	if !ok {
+		return PublicUser{}, ErrNotFound
+	}
+
+	original := record
+	if update.DisplayName != nil {
+		displayName, err := normalizeDisplayName(*update.DisplayName, record.Email)
+		if err != nil {
+			return PublicUser{}, err
+		}
+		record.DisplayName = displayName
+	}
+	if update.AvatarURL != nil {
+		avatarURL, err := normalizeAvatarURL(*update.AvatarURL)
+		if err != nil {
+			return PublicUser{}, err
+		}
+		record.AvatarURL = avatarURL
+	}
+
+	s.users[record.ID] = record
+	if err := s.saveLocked(); err != nil {
+		s.users[original.ID] = original
+		return PublicUser{}, err
+	}
+	return toPublicUser(record), nil
+}
+
+func (s *Store) ChangePassword(id, currentPassword, newPassword string) error {
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.users[strings.TrimSpace(id)]
+	if !ok {
+		return ErrNotFound
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(record.PasswordHash), []byte(currentPassword)); err != nil {
+		return ErrCurrentPassword
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	original := record
+	record.PasswordHash = string(passwordHash)
+	s.users[record.ID] = record
+	if err := s.saveLocked(); err != nil {
+		s.users[original.ID] = original
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ResetPassword(email, newPassword string) error {
+	normalizedEmail, err := normalizeEmail(email)
+	if err != nil {
+		return ErrNotFound
+	}
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record := s.findByEmailLocked(normalizedEmail)
+	if record == nil {
+		return ErrNotFound
+	}
+
+	original := *record
+	record.PasswordHash = string(passwordHash)
+	s.users[record.ID] = *record
+	if err := s.saveLocked(); err != nil {
+		s.users[record.ID] = original
+		return err
+	}
+	return nil
 }
 
 func (s *Store) HasUsers() bool {
@@ -323,6 +431,8 @@ func toPublicUser(record Record) PublicUser {
 	return PublicUser{
 		ID:          record.ID,
 		Email:       record.Email,
+		DisplayName: firstNonEmptyTrimmed(record.DisplayName, buildDefaultDisplayName(record.Email)),
+		AvatarURL:   strings.TrimSpace(record.AvatarURL),
 		Role:        normalizeRole(record.Role),
 		Disabled:    record.Disabled,
 		CreatedAt:   record.CreatedAt,
@@ -333,6 +443,8 @@ func toPublicUser(record Record) PublicUser {
 func normalizeRecord(item Record) (Record, bool) {
 	item.ID = strings.TrimSpace(item.ID)
 	item.Email = strings.ToLower(strings.TrimSpace(item.Email))
+	item.DisplayName = firstNonEmptyTrimmed(item.DisplayName, buildDefaultDisplayName(item.Email))
+	item.AvatarURL = strings.TrimSpace(item.AvatarURL)
 	item.Role = normalizeRole(item.Role)
 	item.PasswordHash = strings.TrimSpace(item.PasswordHash)
 	item.CreatedAt = strings.TrimSpace(item.CreatedAt)
@@ -389,4 +501,63 @@ func validatePassword(password string) error {
 		return fmt.Errorf("password must be at least 6 characters")
 	}
 	return nil
+}
+
+func normalizeDisplayName(value, fallbackEmail string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return buildDefaultDisplayName(fallbackEmail), nil
+	}
+	if len([]rune(trimmed)) > 32 {
+		return "", fmt.Errorf("display name must be at most 32 characters")
+	}
+	return trimmed, nil
+}
+
+func normalizeAvatarURL(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	if len(trimmed) > 2*1024*1024 {
+		return "", fmt.Errorf("avatar is too large")
+	}
+	lowered := strings.ToLower(trimmed)
+	if strings.HasPrefix(lowered, "data:image/") || strings.HasPrefix(lowered, "https://") || strings.HasPrefix(lowered, "http://") {
+		return trimmed, nil
+	}
+	return "", fmt.Errorf("avatar format is invalid")
+}
+
+func buildDefaultDisplayName(email string) string {
+	localPart := strings.TrimSpace(email)
+	if at := strings.Index(localPart, "@"); at > 0 {
+		localPart = localPart[:at]
+	}
+	localPart = strings.TrimSpace(localPart)
+	if localPart == "" {
+		return "创作者"
+	}
+	return truncateRunes(localPart, 32)
+}
+
+func truncateRunes(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit])
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

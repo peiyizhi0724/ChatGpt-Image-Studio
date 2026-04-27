@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Images, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Users } from "lucide-react";
+import { Images, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users } from "lucide-react";
 
+import { PortalAvatar } from "@/components/portal-avatar";
 import { fetchVersionInfo } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { usePortalSession } from "@/store/session";
@@ -45,14 +46,16 @@ export function TopNav() {
     };
   }, []);
 
-  if (pathname === "/login" || pathname === "/register") {
+  if (pathname === "/login" || pathname === "/register" || pathname === "/forgot-password") {
     return null;
   }
 
+  const displayName = user?.display_name?.trim() || user?.email || "共享图片工作区";
   const navItems = [
     { href: "/workspace", label: "图片工作台", description: "生成、编辑与放大", icon: Sparkles, visible: true },
     { href: "/works", label: "我的作品", description: "本地历史与发布入口", icon: Images, visible: true },
     { href: "/gallery", label: "作品广场", description: "服务器保存的共享作品", icon: LayoutGrid, visible: true },
+    { href: "/settings", label: "个人设置", description: "头像、昵称与密码", icon: Settings2, visible: true },
     { href: "/users", label: "用户管理", description: "角色、启停与总额度", icon: Users, visible: user?.role === "admin" },
   ].filter((item) => item.visible);
 
@@ -67,16 +70,19 @@ export function TopNav() {
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-semibold tracking-tight text-stone-900">Cheilins Studio</span>
-                <span className="block truncate text-xs text-stone-500">{user?.email || "共享图片工作区"}</span>
+                <span className="block truncate text-xs text-stone-500">{displayName}</span>
               </span>
             </Link>
-            <button
-              type="button"
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-2xl border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
-              onClick={() => void logout()}
-            >
-              <LogOut className="size-4" />
-            </button>
+            <div className="flex items-center gap-2">
+              <PortalAvatar src={user?.avatar_url} name={user?.display_name} email={user?.email} className="size-10" />
+              <button
+                type="button"
+                className="inline-flex h-10 shrink-0 items-center justify-center rounded-2xl border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
+                onClick={() => void logout()}
+              >
+                <LogOut className="size-4" />
+              </button>
+            </div>
           </div>
 
           <nav className="mt-3 grid gap-2">
@@ -122,7 +128,7 @@ export function TopNav() {
               {!collapsed ? (
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold tracking-tight text-stone-900">Cheilins Studio</span>
-                  <span className="block truncate text-xs text-stone-500">{user?.email || "共享图片工作区"}</span>
+                  <span className="block truncate text-xs text-stone-500">{displayName}</span>
                 </span>
               ) : null}
             </Link>
@@ -170,10 +176,29 @@ export function TopNav() {
           </nav>
 
           <div className="mt-auto space-y-3">
-            <div className={cn("rounded-2xl bg-white/70 text-xs text-stone-500 shadow-sm", collapsed ? "px-2 py-3 text-center" : "px-4 py-3")}>
-              {!collapsed ? <div className="font-medium text-stone-700">版本与角色</div> : null}
-              <div className={cn(!collapsed ? "mt-1" : "font-medium")}>{versionLabel}</div>
-              {!collapsed ? <div className="mt-1 text-stone-400">{user?.role === "admin" ? "管理员" : "普通用户"}</div> : null}
+            <div className={cn("rounded-2xl bg-white/70 text-xs text-stone-500 shadow-sm", collapsed ? "px-2 py-3" : "px-4 py-3")}>
+              <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-3")}>
+                <PortalAvatar
+                  src={user?.avatar_url}
+                  name={user?.display_name}
+                  email={user?.email}
+                  className={cn(collapsed ? "size-11" : "size-12")}
+                />
+                {!collapsed ? (
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-stone-900">{displayName}</div>
+                    <div className="mt-1 truncate text-xs text-stone-500">{user?.email}</div>
+                  </div>
+                ) : null}
+              </div>
+              {!collapsed ? (
+                <div className="mt-3 flex items-center justify-between gap-3 text-xs text-stone-400">
+                  <span>{user?.role === "admin" ? "管理员" : "普通用户"}</span>
+                  <span>{versionLabel}</span>
+                </div>
+              ) : (
+                <div className="mt-2 text-center text-[11px] text-stone-400">{versionLabel}</div>
+              )}
             </div>
 
             <button

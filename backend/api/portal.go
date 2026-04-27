@@ -38,6 +38,8 @@ type portalUserUsageResponse struct {
 type portalUserResponse struct {
 	ID          string                  `json:"id"`
 	Email       string                  `json:"email"`
+	DisplayName string                  `json:"display_name"`
+	AvatarURL   string                  `json:"avatar_url"`
 	Role        string                  `json:"role"`
 	Disabled    bool                    `json:"disabled"`
 	CreatedAt   string                  `json:"created_at"`
@@ -130,6 +132,67 @@ func (s *Server) handlePortalRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handlePortalPasswordCode(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+		return
+	}
+
+	if s.mailer == nil || !s.mailer.Enabled() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "mail sender is not configured"})
+		return
+	}
+	if !s.userStore.EmailExists(body.Email) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "user not found"})
+		return
+	}
+
+	entry, err := s.verifier.Issue(body.Email)
+	if err != nil {
+		writeJSON(w, statusForVerificationError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	if err := s.mailer.SendVerificationCode(strings.TrimSpace(body.Email), entry.Code); err != nil {
+		s.verifier.Consume(body.Email)
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                 true,
+		"expires_in_seconds": max(60, int(time.Until(entry.ExpiresAt).Seconds())),
+		"resend_in_seconds":  max(1, int(time.Until(entry.ResendAt).Seconds())),
+		"delivery":           "email",
+	})
+}
+
+func (s *Server) handlePortalPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+		return
+	}
+
+	if err := s.verifier.Verify(body.Email, body.Code); err != nil {
+		writeJSON(w, statusForVerificationError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	if err := s.userStore.ResetPassword(body.Email, body.Password); err != nil {
+		writeJSON(w, statusForUserError(err), map[string]any{"error": err.Error()})
+		return
+	}
+
+	s.verifier.Consume(body.Email)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *Server) handlePortalLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
@@ -168,6 +231,60 @@ func (s *Server) handlePortalMe(w http.ResponseWriter, r *http.Request) {
 		"user":  s.decoratePortalUser(r.Context(), user),
 		"quota": s.buildPortalQuotaSummary(),
 	})
+}
+
+func (s *Server) handlePortalUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	user, ok := portalUserFromContext(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+
+	var body struct {
+		DisplayName *string `json:"display_name"`
+		AvatarURL   *string `json:"avatar_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+		return
+	}
+
+	updated, err := s.userStore.UpdateProfile(user.ID, users.ProfileUpdate{
+		DisplayName: body.DisplayName,
+		AvatarURL:   body.AvatarURL,
+	})
+	if err != nil {
+		writeJSON(w, statusForUserError(err), map[string]any{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":  s.decoratePortalUser(r.Context(), updated),
+		"quota": s.buildPortalQuotaSummary(),
+	})
+}
+
+func (s *Server) handlePortalChangePassword(w http.ResponseWriter, r *http.Request) {
+	user, ok := portalUserFromContext(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+		return
+	}
+
+	if err := s.userStore.ChangePassword(user.ID, body.CurrentPassword, body.NewPassword); err != nil {
+		writeJSON(w, statusForUserError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handlePortalWorkspaceBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -357,14 +474,16 @@ func (s *Server) handlePortalPublishGalleryWork(w http.ResponseWriter, r *http.R
 	}
 
 	item, err := store.PublishWork(r.Context(), portalstore.PublishInput{
-		UserID:       user.ID,
-		UserEmail:    user.Email,
-		Title:        body.Title,
-		Prompt:       body.Prompt,
-		ImageDataURL: body.ImageDataURL,
-		ImageURL:     body.ImageURL,
-		Model:        body.Model,
-		Size:         body.Size,
+		UserID:          user.ID,
+		UserEmail:       user.Email,
+		UserDisplayName: user.DisplayName,
+		UserAvatarURL:   user.AvatarURL,
+		Title:           body.Title,
+		Prompt:          body.Prompt,
+		ImageDataURL:    body.ImageDataURL,
+		ImageURL:        body.ImageURL,
+		Model:           body.Model,
+		Size:            body.Size,
 	})
 	if err != nil {
 		writeJSON(w, statusForPortalGalleryError(err), map[string]any{"error": err.Error()})
@@ -575,6 +694,8 @@ func (s *Server) decoratePortalUser(ctx context.Context, user users.PublicUser) 
 	return portalUserResponse{
 		ID:          user.ID,
 		Email:       user.Email,
+		DisplayName: user.DisplayName,
+		AvatarURL:   user.AvatarURL,
 		Role:        user.Role,
 		Disabled:    user.Disabled,
 		CreatedAt:   user.CreatedAt,
@@ -595,6 +716,8 @@ func (s *Server) decoratePortalUsers(ctx context.Context, items []users.PublicUs
 		result = append(result, portalUserResponse{
 			ID:          item.ID,
 			Email:       item.Email,
+			DisplayName: item.DisplayName,
+			AvatarURL:   item.AvatarURL,
 			Role:        item.Role,
 			Disabled:    item.Disabled,
 			CreatedAt:   item.CreatedAt,
@@ -686,7 +809,7 @@ func statusForUserError(err error) int {
 	switch err {
 	case nil:
 		return http.StatusOK
-	case users.ErrInvalidCredentials, users.ErrUserDisabled:
+	case users.ErrInvalidCredentials, users.ErrUserDisabled, users.ErrCurrentPassword:
 		return http.StatusUnauthorized
 	case users.ErrEmailExists, users.ErrLastAdminRequired:
 		return http.StatusBadRequest

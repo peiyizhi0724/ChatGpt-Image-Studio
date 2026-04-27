@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { CircleAlert, LoaderCircle, Mail, Sparkles } from "lucide-react";
+import { LoaderCircle, Mail, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -78,8 +78,6 @@ export default function LoginPage() {
               ))}
             </div>
           </div>
-
-          <div className="text-xs text-white/50">首个注册用户会自动成为管理员。</div>
         </div>
 
         <div className="flex items-center justify-center px-5 py-8 sm:px-8 lg:px-10">
@@ -109,9 +107,14 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-3">
-              <label htmlFor="password" className="block text-sm font-medium text-stone-700">
-                密码
-              </label>
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="password" className="block text-sm font-medium text-stone-700">
+                  密码
+                </label>
+                <Link to="/forgot-password" className="text-sm font-medium text-stone-500 underline underline-offset-4 hover:text-stone-900">
+                  忘记密码
+                </Link>
+              </div>
               <Input
                 id="password"
                 type="password"
@@ -141,15 +144,6 @@ export default function LoginPage() {
               <Link to="/register" className="font-medium text-stone-950 underline underline-offset-4">
                 立即注册
               </Link>
-            </div>
-
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950">
-              <div className="flex items-center gap-2 font-medium">
-                <CircleAlert className="size-4" />
-                使用与风险提示
-              </div>
-              <div className="mt-2">本项目仅供个人学习、技术研究与非商业交流使用，严禁用于违法违规用途。</div>
-              <div className="mt-1">项目依赖 ChatGPT 官网能力与账号池，仍存在账号限制、风控或临时不可用风险。</div>
             </div>
           </div>
         </div>

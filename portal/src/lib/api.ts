@@ -22,6 +22,8 @@ export type Account = {
 export type PortalUser = {
   id: string;
   email: string;
+  display_name: string;
+  avatar_url: string;
   role: "admin" | "user";
   disabled: boolean;
   created_at: string;
@@ -63,6 +65,8 @@ export type PortalGalleryWork = {
   id: string;
   user_id: string;
   user_email: string;
+  user_display_name: string;
+  user_avatar_url: string;
   title: string;
   prompt: string;
   image_url: string;
@@ -79,6 +83,8 @@ export type PortalGalleryComment = {
   work_id: string;
   user_id: string;
   user_email: string;
+  user_display_name: string;
+  user_avatar_url: string;
   content: string;
   created_at: string;
 };
@@ -163,6 +169,27 @@ export async function registerPortal(email: string, password: string, code: stri
   });
 }
 
+export async function sendPortalPasswordResetCode(email: string) {
+  return httpRequest<{
+    ok: boolean;
+    expires_in_seconds: number;
+    resend_in_seconds: number;
+    delivery: "email";
+  }>("/portal/api/password/code", {
+    method: "POST",
+    body: { email },
+    redirectOnUnauthorized: false,
+  });
+}
+
+export async function resetPortalPassword(email: string, password: string, code: string) {
+  return httpRequest<{ ok: boolean }>("/portal/api/password/reset", {
+    method: "POST",
+    body: { email, password, code },
+    redirectOnUnauthorized: false,
+  });
+}
+
 export async function logoutPortal() {
   return httpRequest<{ ok: boolean }>("/portal/api/logout", {
     method: "POST",
@@ -173,6 +200,23 @@ export async function logoutPortal() {
 export async function fetchPortalMe() {
   return httpRequest<PortalSessionPayload>("/portal/api/me", {
     redirectOnUnauthorized: false,
+  });
+}
+
+export async function updatePortalProfile(payload: { display_name?: string; avatar_url?: string }) {
+  return httpRequest<PortalSessionPayload>("/portal/api/me/profile", {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+export async function changePortalPassword(currentPassword: string, newPassword: string) {
+  return httpRequest<{ ok: boolean }>("/portal/api/me/password", {
+    method: "POST",
+    body: {
+      current_password: currentPassword,
+      new_password: newPassword,
+    },
   });
 }
 

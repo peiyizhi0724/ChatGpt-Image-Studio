@@ -36,38 +36,44 @@ type UserUsage struct {
 }
 
 type PublishInput struct {
-	UserID       string
-	UserEmail    string
-	Title        string
-	Prompt       string
-	ImageDataURL string
-	ImageURL     string
-	Model        string
-	Size         string
+	UserID          string
+	UserEmail       string
+	UserDisplayName string
+	UserAvatarURL   string
+	Title           string
+	Prompt          string
+	ImageDataURL    string
+	ImageURL        string
+	Model           string
+	Size            string
 }
 
 type GalleryWork struct {
-	ID            string `json:"id"`
-	UserID        string `json:"user_id"`
-	UserEmail     string `json:"user_email"`
-	Title         string `json:"title"`
-	Prompt        string `json:"prompt"`
-	ImageURL      string `json:"image_url"`
-	Model         string `json:"model"`
-	Size          string `json:"size"`
-	LikeCount     int    `json:"like_count"`
-	CommentCount  int    `json:"comment_count"`
-	CreatedAt     string `json:"created_at"`
-	LikedByViewer bool   `json:"liked_by_viewer"`
+	ID              string `json:"id"`
+	UserID          string `json:"user_id"`
+	UserEmail       string `json:"user_email"`
+	UserDisplayName string `json:"user_display_name"`
+	UserAvatarURL   string `json:"user_avatar_url"`
+	Title           string `json:"title"`
+	Prompt          string `json:"prompt"`
+	ImageURL        string `json:"image_url"`
+	Model           string `json:"model"`
+	Size            string `json:"size"`
+	LikeCount       int    `json:"like_count"`
+	CommentCount    int    `json:"comment_count"`
+	CreatedAt       string `json:"created_at"`
+	LikedByViewer   bool   `json:"liked_by_viewer"`
 }
 
 type GalleryComment struct {
-	ID        string `json:"id"`
-	WorkID    string `json:"work_id"`
-	UserID    string `json:"user_id"`
-	UserEmail string `json:"user_email"`
-	Content   string `json:"content"`
-	CreatedAt string `json:"created_at"`
+	ID              string `json:"id"`
+	WorkID          string `json:"work_id"`
+	UserID          string `json:"user_id"`
+	UserEmail       string `json:"user_email"`
+	UserDisplayName string `json:"user_display_name"`
+	UserAvatarURL   string `json:"user_avatar_url"`
+	Content         string `json:"content"`
+	CreatedAt       string `json:"created_at"`
 }
 
 type GalleryListOptions struct {
@@ -227,18 +233,20 @@ func (s *Store) PublishWork(ctx context.Context, input PublishInput) (GalleryWor
 	}
 
 	work := GalleryWork{
-		ID:            uuid.NewString(),
-		UserID:        userID,
-		UserEmail:     userEmail,
-		Title:         firstNonEmpty(strings.TrimSpace(input.Title), buildWorkTitle(prompt)),
-		Prompt:        prompt,
-		ImageURL:      imageURL,
-		Model:         strings.TrimSpace(input.Model),
-		Size:          strings.TrimSpace(input.Size),
-		LikeCount:     0,
-		CommentCount:  0,
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
-		LikedByViewer: false,
+		ID:              uuid.NewString(),
+		UserID:          userID,
+		UserEmail:       userEmail,
+		UserDisplayName: firstNonEmpty(strings.TrimSpace(input.UserDisplayName), userEmail),
+		UserAvatarURL:   strings.TrimSpace(input.UserAvatarURL),
+		Title:           firstNonEmpty(strings.TrimSpace(input.Title), buildWorkTitle(prompt)),
+		Prompt:          prompt,
+		ImageURL:        imageURL,
+		Model:           strings.TrimSpace(input.Model),
+		Size:            strings.TrimSpace(input.Size),
+		LikeCount:       0,
+		CommentCount:    0,
+		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
+		LikedByViewer:   false,
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -285,6 +293,8 @@ func (s *Store) ListWorks(ctx context.Context, options GalleryListOptions) ([]Ga
 			w.id,
 			w.user_id,
 			w.user_email,
+			COALESCE(NULLIF(TRIM(u.display_name), ''), w.user_email) AS user_display_name,
+			COALESCE(NULLIF(TRIM(u.avatar_url), ''), '') AS user_avatar_url,
 			w.title,
 			w.prompt,
 			w.image_url,
@@ -300,11 +310,13 @@ func (s *Store) ListWorks(ctx context.Context, options GalleryListOptions) ([]Ga
 				ELSE 0
 			END AS liked_by_viewer
 		FROM portal_gallery_works w
+		LEFT JOIN portal_users u ON u.id = w.user_id
 		WHERE (
 			? = ''
 			OR w.title LIKE ? ESCAPE '\'
 			OR w.prompt LIKE ? ESCAPE '\'
 			OR w.user_email LIKE ? ESCAPE '\'
+			OR COALESCE(NULLIF(TRIM(u.display_name), ''), w.user_email) LIKE ? ESCAPE '\'
 		)
 		ORDER BY %s
 		LIMIT ?
@@ -316,6 +328,7 @@ func (s *Store) ListWorks(ctx context.Context, options GalleryListOptions) ([]Ga
 		strings.TrimSpace(options.ViewerUserID),
 		strings.TrimSpace(options.ViewerUserID),
 		search,
+		searchLike,
 		searchLike,
 		searchLike,
 		searchLike,
@@ -334,6 +347,8 @@ func (s *Store) ListWorks(ctx context.Context, options GalleryListOptions) ([]Ga
 			&item.ID,
 			&item.UserID,
 			&item.UserEmail,
+			&item.UserDisplayName,
+			&item.UserAvatarURL,
 			&item.Title,
 			&item.Prompt,
 			&item.ImageURL,
@@ -365,6 +380,8 @@ func (s *Store) GetWork(ctx context.Context, workID, viewerUserID string) (Galle
 			w.id,
 			w.user_id,
 			w.user_email,
+			COALESCE(NULLIF(TRIM(u.display_name), ''), w.user_email) AS user_display_name,
+			COALESCE(NULLIF(TRIM(u.avatar_url), ''), '') AS user_avatar_url,
 			w.title,
 			w.prompt,
 			w.image_url,
@@ -380,11 +397,14 @@ func (s *Store) GetWork(ctx context.Context, workID, viewerUserID string) (Galle
 				ELSE 0
 			END AS liked_by_viewer
 		FROM portal_gallery_works w
+		LEFT JOIN portal_users u ON u.id = w.user_id
 		WHERE w.id = ?
 	`, strings.TrimSpace(viewerUserID), strings.TrimSpace(viewerUserID), workID).Scan(
 		&item.ID,
 		&item.UserID,
 		&item.UserEmail,
+		&item.UserDisplayName,
+		&item.UserAvatarURL,
 		&item.Title,
 		&item.Prompt,
 		&item.ImageURL,
@@ -404,8 +424,17 @@ func (s *Store) GetWork(ctx context.Context, workID, viewerUserID string) (Galle
 	item.LikedByViewer = liked != 0
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, work_id, user_id, user_email, content, created_at
-		FROM portal_gallery_comments
+		SELECT
+			c.id,
+			c.work_id,
+			c.user_id,
+			c.user_email,
+			COALESCE(NULLIF(TRIM(u.display_name), ''), c.user_email) AS user_display_name,
+			COALESCE(NULLIF(TRIM(u.avatar_url), ''), '') AS user_avatar_url,
+			c.content,
+			c.created_at
+		FROM portal_gallery_comments c
+		LEFT JOIN portal_users u ON u.id = c.user_id
 		WHERE work_id = ?
 		ORDER BY created_at ASC
 	`, workID)
@@ -417,7 +446,16 @@ func (s *Store) GetWork(ctx context.Context, workID, viewerUserID string) (Galle
 	comments := make([]GalleryComment, 0)
 	for rows.Next() {
 		var comment GalleryComment
-		if err := rows.Scan(&comment.ID, &comment.WorkID, &comment.UserID, &comment.UserEmail, &comment.Content, &comment.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&comment.ID,
+			&comment.WorkID,
+			&comment.UserID,
+			&comment.UserEmail,
+			&comment.UserDisplayName,
+			&comment.UserAvatarURL,
+			&comment.Content,
+			&comment.CreatedAt,
+		); err != nil {
 			return GalleryWork{}, nil, err
 		}
 		comments = append(comments, comment)
@@ -516,12 +554,14 @@ func (s *Store) AddComment(ctx context.Context, workID string, user users.Public
 	}
 
 	comment := GalleryComment{
-		ID:        uuid.NewString(),
-		WorkID:    workID,
-		UserID:    strings.TrimSpace(user.ID),
-		UserEmail: strings.TrimSpace(user.Email),
-		Content:   content,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		ID:              uuid.NewString(),
+		WorkID:          workID,
+		UserID:          strings.TrimSpace(user.ID),
+		UserEmail:       strings.TrimSpace(user.Email),
+		UserDisplayName: firstNonEmpty(strings.TrimSpace(user.DisplayName), strings.TrimSpace(user.Email)),
+		UserAvatarURL:   strings.TrimSpace(user.AvatarURL),
+		Content:         content,
+		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO portal_gallery_comments (id, work_id, user_id, user_email, content, created_at)

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BarChart3, LoaderCircle, ShieldCheck, ShieldX, Sparkles, Upload, UserCog, Users } from "lucide-react";
 import { toast } from "sonner";
 
+import { PortalAvatar } from "@/components/portal-avatar";
 import { Button } from "@/components/ui/button";
 import { fetchPortalUsers, updatePortalUser, type PortalQuotaSummary, type PortalUser } from "@/lib/api";
 
@@ -95,7 +96,7 @@ export default function UsersPage() {
             <span className="text-sm font-medium">管理员</span>
           </div>
           <div className="mt-4 text-3xl font-semibold tracking-tight text-stone-950">{adminUsers}</div>
-          <div className="mt-2 text-sm text-stone-500">首个注册用户默认为管理员</div>
+          <div className="mt-2 text-sm text-stone-500">可统一管理用户状态与共享额度</div>
         </div>
 
         <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
@@ -167,7 +168,7 @@ export default function UsersPage() {
             <table className="min-w-full text-left text-sm">
               <thead className="bg-stone-50 text-stone-500">
                 <tr>
-                  <th className="px-6 py-4 font-medium">邮箱</th>
+                  <th className="px-6 py-4 font-medium">用户</th>
                   <th className="px-6 py-4 font-medium">角色</th>
                   <th className="px-6 py-4 font-medium">状态</th>
                   <th className="px-6 py-4 font-medium">使用量</th>
@@ -183,8 +184,19 @@ export default function UsersPage() {
                   return (
                     <tr key={user.id} className="border-t border-stone-100 align-top">
                       <td className="px-6 py-4">
-                        <div className="font-medium text-stone-950">{user.email}</div>
-                        <div className="mt-1 text-xs text-stone-400">{user.id}</div>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <PortalAvatar
+                            src={user.avatar_url}
+                            name={user.display_name}
+                            email={user.email}
+                            className="size-11"
+                          />
+                          <div className="min-w-0">
+                            <div className="truncate font-medium text-stone-950">{user.display_name || user.email}</div>
+                            <div className="mt-1 truncate text-xs text-stone-500">{user.email}</div>
+                            <div className="mt-1 truncate text-xs text-stone-400">{user.id}</div>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <span className="inline-flex rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-700">

@@ -2,17 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LoaderCircle, MailPlus, Sparkles } from "lucide-react";
+import { KeyRound, LoaderCircle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { registerPortal, sendPortalRegisterCode } from "@/lib/api";
-import { usePortalSession } from "@/store/session";
+import { resetPortalPassword, sendPortalPasswordResetCode } from "@/lib/api";
 
-export default function RegisterPage() {
+export default function ForgotPasswordPage() {
   const navigate = useNavigate();
-  const { applySession } = usePortalSession();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -45,18 +43,17 @@ export default function RegisterPage() {
 
     setIsSendingCode(true);
     try {
-      const payload = await sendPortalRegisterCode(email);
+      const payload = await sendPortalPasswordResetCode(email);
       setCountdown(Math.max(1, payload.resend_in_seconds || 60));
       toast.success("验证码已发送，请检查邮箱");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "发送验证码失败";
-      toast.error(message);
+      toast.error(error instanceof Error ? error.message : "发送验证码失败");
     } finally {
       setIsSendingCode(false);
     }
   };
 
-  const handleRegister = async () => {
+  const handleResetPassword = async () => {
     if (!email.trim()) {
       toast.error("请输入邮箱");
       return;
@@ -76,12 +73,11 @@ export default function RegisterPage() {
 
     setIsSubmitting(true);
     try {
-      const payload = await registerPortal(email, password, code);
-      applySession(payload);
-      navigate("/workspace", { replace: true });
+      await resetPortalPassword(email, password, code);
+      toast.success("密码已重置，请重新登录");
+      navigate("/login", { replace: true });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "注册失败";
-      toast.error(message);
+      toast.error(error instanceof Error ? error.message : "重置密码失败");
     } finally {
       setIsSubmitting(false);
     }
@@ -97,43 +93,56 @@ export default function RegisterPage() {
             </span>
             <div>
               <div className="text-sm font-semibold tracking-tight">Cheilins Studio</div>
-              <div className="mt-1 text-xs text-white/65">共享工作区注册入口</div>
+              <div className="mt-1 text-xs text-white/65">邮箱找回密码入口</div>
             </div>
           </div>
 
           <div className="space-y-6">
             <div className="space-y-3">
-              <div className="text-sm font-medium uppercase tracking-[0.24em] text-white/55">Register</div>
+              <div className="text-sm font-medium uppercase tracking-[0.24em] text-white/55">Password Reset</div>
               <h1 className="max-w-[420px] text-[40px] font-semibold leading-[1.1] tracking-tight">
-                创建你的图片工作区账号。
+                通过邮箱验证码，安全重设账号密码。
               </h1>
               <p className="max-w-[430px] text-sm leading-7 text-white/72">
-                注册成功后会自动登录，你可以直接进入共享图片工作台开始生成、编辑和发布作品。
+                系统会向你的注册邮箱发送验证码，验证通过后即可重新设置登录密码。
               </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[
+                ["验证", "输入注册邮箱获取验证码"],
+                ["重设", "设置新的登录密码"],
+                ["返回", "完成后重新登录工作区"],
+              ].map(([title, desc]) => (
+                <div key={title} className="rounded-2xl border border-white/12 bg-white/6 p-4 backdrop-blur-sm">
+                  <div className="text-sm font-semibold">{title}</div>
+                  <div className="mt-2 text-xs leading-6 text-white/65">{desc}</div>
+                </div>
+              ))}
             </div>
           </div>
 
-          <div className="text-xs text-white/50">支持 Docker 部署后的 portal 独立入口。</div>
+          <div className="text-xs text-white/50">支持在登录失效或忘记密码时自助恢复访问。</div>
         </div>
 
         <div className="flex items-center justify-center px-5 py-8 sm:px-8 lg:px-10">
           <div className="w-full max-w-[420px] space-y-8">
             <div className="space-y-4">
               <div className="inline-flex size-14 items-center justify-center rounded-[18px] bg-stone-950 text-white shadow-sm">
-                <MailPlus className="size-5" />
+                <KeyRound className="size-5" />
               </div>
               <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-tight text-stone-950">注册 Portal</h1>
-                <p className="text-sm leading-7 text-stone-500">创建邮箱账号后即可进入共享图片工作台。</p>
+                <h1 className="text-3xl font-semibold tracking-tight text-stone-950">忘记密码</h1>
+                <p className="text-sm leading-7 text-stone-500">使用邮箱验证码重置密码，成功后回到登录页重新进入工作区。</p>
               </div>
             </div>
 
             <div className="space-y-3">
-              <label htmlFor="register-email" className="block text-sm font-medium text-stone-700">
-                邮箱
+              <label htmlFor="forgot-email" className="block text-sm font-medium text-stone-700">
+                注册邮箱
               </label>
               <Input
-                id="register-email"
+                id="forgot-email"
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -143,12 +152,12 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-3">
-              <label htmlFor="register-code" className="block text-sm font-medium text-stone-700">
+              <label htmlFor="forgot-code" className="block text-sm font-medium text-stone-700">
                 邮箱验证码
               </label>
               <div className="flex gap-3">
                 <Input
-                  id="register-code"
+                  id="forgot-code"
                   type="text"
                   value={code}
                   onChange={(event) => setCode(event.target.value)}
@@ -174,11 +183,11 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-3">
-              <label htmlFor="register-password" className="block text-sm font-medium text-stone-700">
-                密码
+              <label htmlFor="forgot-password" className="block text-sm font-medium text-stone-700">
+                新密码
               </label>
               <Input
-                id="register-password"
+                id="forgot-password"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
@@ -188,35 +197,35 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-3">
-              <label htmlFor="register-confirm-password" className="block text-sm font-medium text-stone-700">
-                确认密码
+              <label htmlFor="forgot-confirm-password" className="block text-sm font-medium text-stone-700">
+                确认新密码
               </label>
               <Input
-                id="register-confirm-password"
+                id="forgot-confirm-password"
                 type="password"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
-                    void handleRegister();
+                    void handleResetPassword();
                   }
                 }}
-                placeholder="再次输入密码"
+                placeholder="再次输入新密码"
                 className="h-13 rounded-2xl border-stone-200 bg-stone-50 px-4 shadow-none focus-visible:ring-1"
               />
             </div>
 
             <Button
               className="h-13 w-full rounded-2xl bg-stone-950 text-white hover:bg-stone-800"
-              onClick={() => void handleRegister()}
+              onClick={() => void handleResetPassword()}
               disabled={isSubmitting}
             >
               {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              创建并进入工作区
+              重置密码
             </Button>
 
             <div className="text-center text-sm text-stone-500">
-              已有账号？{" "}
+              想起密码了？{" "}
               <Link to="/login" className="font-medium text-stone-950 underline underline-offset-4">
                 返回登录
               </Link>

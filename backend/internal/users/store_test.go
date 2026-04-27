@@ -113,3 +113,54 @@ func TestSQLiteUsersStoreIgnoresLegacyUsersFile(t *testing.T) {
 		t.Fatal("legacy users file should remain untouched")
 	}
 }
+
+func TestSQLiteUsersStoreProfileAndPasswordFlows(t *testing.T) {
+	cfg := newUsersTestConfig(t)
+
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	user, err := store.Register("artist@example.com", "secret123")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	displayName := "画师A"
+	avatarURL := "https://example.com/avatar.png"
+	updated, err := store.UpdateProfile(user.ID, ProfileUpdate{
+		DisplayName: &displayName,
+		AvatarURL:   &avatarURL,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.DisplayName != displayName {
+		t.Fatalf("display name = %q, want %q", updated.DisplayName, displayName)
+	}
+	if updated.AvatarURL != avatarURL {
+		t.Fatalf("avatar url = %q, want %q", updated.AvatarURL, avatarURL)
+	}
+
+	if err := store.ChangePassword(user.ID, "secret123", "secret456"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if _, err := store.Authenticate("artist@example.com", "secret123"); err == nil {
+		t.Fatal("expected old password to stop working after ChangePassword")
+	}
+	if _, err := store.Authenticate("artist@example.com", "secret456"); err != nil {
+		t.Fatalf("Authenticate with changed password: %v", err)
+	}
+
+	if err := store.ResetPassword("artist@example.com", "secret789"); err != nil {
+		t.Fatalf("ResetPassword: %v", err)
+	}
+	if _, err := store.Authenticate("artist@example.com", "secret456"); err == nil {
+		t.Fatal("expected previous password to stop working after ResetPassword")
+	}
+	if _, err := store.Authenticate("artist@example.com", "secret789"); err != nil {
+		t.Fatalf("Authenticate with reset password: %v", err)
+	}
+}
