@@ -278,6 +278,11 @@ func (s *Server) reloadRuntimeDependencies(previous configPayload) error {
 	nextSyncClient := s.buildSyncClientFromConfig()
 	currentStore := s.getStore()
 	nextStore := currentStore
+	nextMailer := mailer.NewSender(s.cfg.Mail)
+	nextVerifier := verification.NewStore(
+		time.Duration(max(1, s.cfg.Mail.CodeTTLMinutes))*time.Minute,
+		time.Duration(max(1, s.cfg.Mail.ResendInterval))*time.Second,
+	)
 
 	if storageSettingsChanged(previous, s.buildConfigPayload()) {
 		reloadedStore, err := accounts.NewStore(s.cfg)
@@ -303,6 +308,8 @@ func (s *Server) reloadRuntimeDependencies(previous configPayload) error {
 	}
 
 	previousStore := s.swapRuntime(nextStore, nextSyncClient, nextStaticDir)
+	s.mailer = nextMailer
+	s.verifier = nextVerifier
 	if previousStore != nil && previousStore != nextStore {
 		_ = previousStore.Close()
 	}

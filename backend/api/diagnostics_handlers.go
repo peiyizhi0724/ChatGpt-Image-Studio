@@ -339,6 +339,7 @@ func (s *Server) maskSensitiveConfig(payload configPayload) configPayload {
 	payload.App.APIKey = maskSecret(payload.App.APIKey)
 	payload.App.AuthKey = maskSecret(payload.App.AuthKey)
 	payload.CPA.APIKey = maskSecret(payload.CPA.APIKey)
+	payload.Mail.Password = maskSecret(payload.Mail.Password)
 	payload.Sync.ManagementKey = maskSecret(payload.Sync.ManagementKey)
 	payload.Proxy.URL = maskURLAuth(payload.Proxy.URL)
 	payload.NewAPI.Password = maskSecret(payload.NewAPI.Password)

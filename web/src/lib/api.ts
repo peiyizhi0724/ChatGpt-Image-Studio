@@ -255,6 +255,18 @@ export type ConfigPayload = {
     requestTimeout: number;
     routeStrategy: "images_api" | "codex_responses" | "auto";
   };
+  mail: {
+    enabled: boolean;
+    smtpHost: string;
+    smtpPort: number;
+    username: string;
+    password: string;
+    fromAddress: string;
+    fromName: string;
+    useImplicitTLS: boolean;
+    codeTTLMinutes: number;
+    resendInterval: number;
+  };
   newapi: {
     baseUrl: string;
     username: string;

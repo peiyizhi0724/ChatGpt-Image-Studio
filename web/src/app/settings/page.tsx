@@ -28,6 +28,7 @@ import { clearCachedSyncStatus } from "@/store/sync-status-cache";
 import { APIAccessSection } from "./components/api-access-section";
 import { ImageModeSection } from "./components/image-mode-section";
 import { IntegrationSection } from "./components/integration-section";
+import { MailSection } from "./components/mail-section";
 import { RuntimeSection } from "./components/runtime-section";
 import { ServicePathsSection } from "./components/service-paths-section";
 
@@ -133,6 +134,18 @@ function defaultConfigPayload(): ConfigPayload {
       requestTimeout: 60,
       routeStrategy: "images_api",
     },
+    mail: {
+      enabled: false,
+      smtpHost: "",
+      smtpPort: 465,
+      username: "",
+      password: "",
+      fromAddress: "",
+      fromName: "Cheilins Studio",
+      useImplicitTLS: true,
+      codeTTLMinutes: 10,
+      resendInterval: 60,
+    },
     newapi: {
       baseUrl: "",
       username: "",
@@ -200,6 +213,7 @@ function normalizeConfigPayload(
     sync: { ...defaults.sync, ...next.sync },
     proxy: { ...defaults.proxy, ...next.proxy },
     cpa: { ...defaults.cpa, ...next.cpa },
+    mail: { ...defaults.mail, ...next.mail },
     newapi: { ...defaults.newapi, ...next.newapi },
     sub2api: { ...defaults.sub2api, ...next.sub2api },
     log: { ...defaults.log, ...next.log },
@@ -532,6 +546,8 @@ export default function SettingsPage() {
         />
 
         <APIAccessSection config={config} setSection={setSection} />
+
+        <MailSection config={config} setSection={setSection} />
 
         <IntegrationSection config={config} setSection={setSection} />
 
