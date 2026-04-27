@@ -154,7 +154,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-start">
-            <div className="rounded-[28px] border border-stone-200 bg-[#f7f7f4] p-5">
+            <div className="mx-auto w-full max-w-[320px] rounded-[28px] border border-stone-200 bg-[#f7f7f4] p-5 lg:mx-0">
               <PortalAvatar
                 src={avatarUrl}
                 name={displayName || user?.display_name}
@@ -164,13 +164,13 @@ export default function SettingsPage() {
               />
               <div className="mt-4 text-center text-sm font-medium text-stone-700">头像预览</div>
               <div className="mt-2 text-center text-xs leading-5 text-stone-500">推荐使用 1:1 图片，支持 JPG / PNG / WEBP。</div>
-              <div className="mt-4 flex justify-center gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-50">
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                <label className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-50 sm:w-auto">
                   <Upload className="size-4" />
                   上传头像
                   <input type="file" accept="image/*" className="hidden" onChange={(event) => void handleAvatarChange(event)} />
                 </label>
-                <Button type="button" variant="outline" className="rounded-full" onClick={() => setAvatarUrl("")} disabled={!avatarUrl}>
+                <Button type="button" variant="outline" className="w-full rounded-full sm:w-auto" onClick={() => setAvatarUrl("")} disabled={!avatarUrl}>
                   <X className="size-4" />
                   清除
                 </Button>
@@ -214,11 +214,11 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-stone-200 bg-[#fafaf8] px-5 py-4">
+              <div className="flex flex-col gap-3 rounded-[24px] border border-stone-200 bg-[#fafaf8] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm leading-6 text-stone-600">保存后会立即更新当前会话，并同步显示到作品广场与评论区。</div>
                 <Button
                   type="button"
-                  className="rounded-full bg-stone-950 text-white hover:bg-stone-800"
+                  className="w-full rounded-full bg-stone-950 text-white hover:bg-stone-800 sm:w-auto"
                   onClick={() => void handleSaveProfile()}
                   disabled={!profileDirty || isSavingProfile}
                 >

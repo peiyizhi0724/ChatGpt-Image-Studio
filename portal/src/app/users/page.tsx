@@ -146,12 +146,12 @@ export default function UsersPage() {
       </div>
 
       <div className="min-h-0 overflow-hidden rounded-[30px] border border-stone-200 bg-white shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
-        <div className="flex items-center justify-between border-b border-stone-100 px-6 py-5">
+        <div className="flex flex-col gap-3 border-b border-stone-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-stone-950">用户管理</h1>
             <p className="mt-1 text-sm text-stone-500">管理员可调整角色与启用状态，当前不限制单用户使用次数。</p>
           </div>
-          <Button variant="outline" className="rounded-2xl" onClick={() => void loadUsers()} disabled={isLoading}>
+          <Button variant="outline" className="w-full rounded-2xl sm:w-auto" onClick={() => void loadUsers()} disabled={isLoading}>
             刷新列表
           </Button>
         </div>
@@ -165,45 +165,31 @@ export default function UsersPage() {
               </div>
             </div>
           ) : (
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-stone-50 text-stone-500">
-                <tr>
-                  <th className="px-6 py-4 font-medium">用户</th>
-                  <th className="px-6 py-4 font-medium">角色</th>
-                  <th className="px-6 py-4 font-medium">状态</th>
-                  <th className="px-6 py-4 font-medium">使用量</th>
-                  <th className="px-6 py-4 font-medium">注册时间</th>
-                  <th className="px-6 py-4 font-medium">最近登录</th>
-                  <th className="px-6 py-4 font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
+            <>
+              <div className="grid gap-3 p-4 lg:hidden">
                 {users.map((user) => {
                   const pending = pendingUserId === user.id;
                   const usage = getUserUsage(user);
                   return (
-                    <tr key={user.id} className="border-t border-stone-100 align-top">
-                      <td className="px-6 py-4">
-                        <div className="flex min-w-0 items-center gap-3">
-                          <PortalAvatar
-                            src={user.avatar_url}
-                            name={user.display_name}
-                            email={user.email}
-                            className="size-11"
-                          />
-                          <div className="min-w-0">
-                            <div className="truncate font-medium text-stone-950">{user.display_name || user.email}</div>
-                            <div className="mt-1 truncate text-xs text-stone-500">{user.email}</div>
-                            <div className="mt-1 truncate text-xs text-stone-400">{user.id}</div>
-                          </div>
+                    <article key={user.id} className="rounded-[24px] border border-stone-200 bg-[#fafaf8] p-4 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <PortalAvatar
+                          src={user.avatar_url}
+                          name={user.display_name}
+                          email={user.email}
+                          className="size-12"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-stone-950">{user.display_name || user.email}</div>
+                          <div className="mt-1 truncate text-xs text-stone-500">{user.email}</div>
+                          <div className="mt-1 truncate text-[11px] text-stone-400">{user.id}</div>
                         </div>
-                      </td>
-                      <td className="px-6 py-4">
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-2">
                         <span className="inline-flex rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-700">
                           {user.role === "admin" ? "管理员" : "普通用户"}
                         </span>
-                      </td>
-                      <td className="px-6 py-4">
                         <span
                           className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${
                             user.disabled ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"
@@ -211,46 +197,139 @@ export default function UsersPage() {
                         >
                           {user.disabled ? "已停用" : "正常"}
                         </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-stone-950">生成 {usage.generatedImages}</div>
-                        <div className="mt-1 text-xs text-stone-500">请求 {usage.imageRequests} · 发布 {usage.publishedWorks}</div>
-                      </td>
-                      <td className="px-6 py-4 text-stone-600">{formatDate(user.created_at)}</td>
-                      <td className="px-6 py-4 text-stone-600">{formatDate(user.last_login_at)}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="outline"
-                            className="rounded-2xl"
-                            disabled={pending || user.role === "admin"}
-                            onClick={() => void handleUserUpdate(user.id, { role: "admin" })}
-                          >
-                            设为管理员
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className="rounded-2xl"
-                            disabled={pending || user.role === "user"}
-                            onClick={() => void handleUserUpdate(user.id, { role: "user" })}
-                          >
-                            设为普通用户
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className="rounded-2xl"
-                            disabled={pending}
-                            onClick={() => void handleUserUpdate(user.id, { disabled: !user.disabled })}
-                          >
-                            {user.disabled ? "启用" : "停用"}
-                          </Button>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-[18px] border border-stone-200 bg-white px-3 py-3 text-sm text-stone-600">
+                          <div className="font-medium text-stone-950">生成 {usage.generatedImages}</div>
+                          <div className="mt-1 text-xs text-stone-500">请求 {usage.imageRequests} · 发布 {usage.publishedWorks}</div>
                         </div>
-                      </td>
-                    </tr>
+                        <div className="rounded-[18px] border border-stone-200 bg-white px-3 py-3 text-xs text-stone-500">
+                          <div>注册时间：{formatDate(user.created_at)}</div>
+                          <div className="mt-1">最近登录：{formatDate(user.last_login_at)}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-2">
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-2xl"
+                          disabled={pending || user.role === "admin"}
+                          onClick={() => void handleUserUpdate(user.id, { role: "admin" })}
+                        >
+                          设为管理员
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-2xl"
+                          disabled={pending || user.role === "user"}
+                          onClick={() => void handleUserUpdate(user.id, { role: "user" })}
+                        >
+                          设为普通用户
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-2xl"
+                          disabled={pending}
+                          onClick={() => void handleUserUpdate(user.id, { disabled: !user.disabled })}
+                        >
+                          {user.disabled ? "启用" : "停用"}
+                        </Button>
+                      </div>
+                    </article>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+
+              <div className="hidden h-full overflow-auto lg:block">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-stone-50 text-stone-500">
+                    <tr>
+                      <th className="px-6 py-4 font-medium">用户</th>
+                      <th className="px-6 py-4 font-medium">角色</th>
+                      <th className="px-6 py-4 font-medium">状态</th>
+                      <th className="px-6 py-4 font-medium">使用量</th>
+                      <th className="px-6 py-4 font-medium">注册时间</th>
+                      <th className="px-6 py-4 font-medium">最近登录</th>
+                      <th className="px-6 py-4 font-medium">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((user) => {
+                      const pending = pendingUserId === user.id;
+                      const usage = getUserUsage(user);
+                      return (
+                        <tr key={user.id} className="border-t border-stone-100 align-top">
+                          <td className="px-6 py-4">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <PortalAvatar
+                                src={user.avatar_url}
+                                name={user.display_name}
+                                email={user.email}
+                                className="size-11"
+                              />
+                              <div className="min-w-0">
+                                <div className="truncate font-medium text-stone-950">{user.display_name || user.email}</div>
+                                <div className="mt-1 truncate text-xs text-stone-500">{user.email}</div>
+                                <div className="mt-1 truncate text-xs text-stone-400">{user.id}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-700">
+                              {user.role === "admin" ? "管理员" : "普通用户"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span
+                              className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${
+                                user.disabled ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"
+                              }`}
+                            >
+                              {user.disabled ? "已停用" : "正常"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="font-medium text-stone-950">生成 {usage.generatedImages}</div>
+                            <div className="mt-1 text-xs text-stone-500">请求 {usage.imageRequests} · 发布 {usage.publishedWorks}</div>
+                          </td>
+                          <td className="px-6 py-4 text-stone-600">{formatDate(user.created_at)}</td>
+                          <td className="px-6 py-4 text-stone-600">{formatDate(user.last_login_at)}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                variant="outline"
+                                className="rounded-2xl"
+                                disabled={pending || user.role === "admin"}
+                                onClick={() => void handleUserUpdate(user.id, { role: "admin" })}
+                              >
+                                设为管理员
+                              </Button>
+                              <Button
+                                variant="outline"
+                                className="rounded-2xl"
+                                disabled={pending || user.role === "user"}
+                                onClick={() => void handleUserUpdate(user.id, { role: "user" })}
+                              >
+                                设为普通用户
+                              </Button>
+                              <Button
+                                variant="outline"
+                                className="rounded-2xl"
+                                disabled={pending}
+                                onClick={() => void handleUserUpdate(user.id, { disabled: !user.disabled })}
+                              >
+                                {user.disabled ? "启用" : "停用"}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       </div>

@@ -367,16 +367,16 @@ export default function WorksPage() {
       </div>
 
       <Dialog open={Boolean(selectedWork)} onOpenChange={(open) => (!open ? setSelectedWork(null) : null)}>
-        <DialogContent className="w-[min(96vw,1040px)] overflow-hidden rounded-[30px] border border-stone-200 bg-white p-0">
+        <DialogContent className="w-[min(96vw,1040px)] max-h-[90vh] overflow-y-auto rounded-[24px] border border-stone-200 bg-white p-0 lg:overflow-hidden lg:rounded-[30px]">
           {selectedWork ? (
-            <div className="grid max-h-[88vh] min-h-0 lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="min-h-0 overflow-auto bg-[#f7f7f4] p-5">
+            <div className="flex min-h-0 flex-col lg:grid lg:max-h-[88vh] lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="bg-[#f7f7f4] p-4 sm:p-5 lg:min-h-0 lg:overflow-auto">
                 <div className="overflow-hidden rounded-[24px] border border-stone-200 bg-white shadow-sm">
                   <Image src={selectedWork.imageUrl} alt={selectedWork.title} className="block h-auto w-full object-contain" />
                 </div>
               </div>
 
-              <div className="flex min-h-0 flex-col border-t border-stone-100 p-6 lg:border-t-0 lg:border-l">
+              <div className="flex min-h-0 flex-col border-t border-stone-100 p-5 sm:p-6 lg:border-t-0 lg:border-l">
                 <DialogHeader className="gap-3">
                   <DialogTitle className="text-2xl tracking-tight text-stone-950">{selectedWork.title}</DialogTitle>
                   <DialogDescription className="text-sm leading-6 text-stone-500">
