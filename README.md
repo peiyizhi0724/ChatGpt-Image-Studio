@@ -3,7 +3,8 @@
 ChatGpt Image Studio 是一个单服务交付的图片工作流项目：
 
 - `backend/`：Go 后端，负责图片接口、账号池、配置管理和静态资源托管
-- `web/`：Vite + React 前端，构建后输出到 `web/dist`
+- `portal/`：多人门户前端，构建后输出到 `backend/portal-static`
+- `web/`：后台管理前端，构建后输出到 `backend/static`
 - `scripts/`：本地开发、检查、构建脚本
 
 项目当前交付方式是“一个二进制 + 一份静态前端 + 本地配置目录”：
@@ -82,8 +83,12 @@ ChatGpt Image Studio 是一个单服务交付的图片工作流项目：
 │   ├── api/                  HTTP 路由与处理器
 │   ├── internal/             配置、账号、同步、中间件、版本信息
 │   ├── data/                 默认模板与本地运行数据目录
-│   ├── static/               本地开发时同步的前端静态资源（构建产物，不入库）
+│   ├── portal-static/        多人门户静态资源（构建产物，不入库）
+│   ├── static/               后台管理静态资源（构建产物，不入库）
 │   └── main.go
+├── portal/                   多人门户前端
+│   ├── src/                  React 页面与组件
+│   └── dist/                 构建产物（不入库）
 ├── web/                      Vite 前端
 │   ├── src/                  React 页面与组件
 │   └── dist/                 构建产物（不入库）
@@ -132,6 +137,38 @@ chmod +x ./scripts/*.sh
 
 - 多人门户：`http://127.0.0.1:7000`
 - 后台管理：`http://127.0.0.1:7000/admin`
+
+页面路由结构：
+
+- 多人门户首页：`/`
+- 门户登录：`/login`
+- 图片工作台：`/workspace`
+- 我的作品：`/works`
+- 作品广场：`/gallery`
+- 门户用户管理：`/users`
+- 后台管理首页：`/admin`
+- 后台登录：`/admin/login`
+
+路由兼容说明：
+
+- 旧的 `/portal/*` 页面地址会自动重定向到新的门户根路径结构
+- 旧的后台页面地址如 `/accounts`、`/settings`、`/requests`、`/image/*` 会自动重定向到 `/admin/*`
+- 这次调整只改“页面访问路径”，不改现有 API 路径
+
+API 地址是否变化：
+
+- OpenAI 兼容图片 API：`不变`
+- 后台管理接口：`不变`
+- 门户内部接口：`不变`
+
+也就是说：
+
+- 第三方客户端的 API Base URL 仍然是 `https://你的域名`
+- 图片生成接口仍然是 `POST /v1/images/generations`
+- 图片编辑接口仍然是 `POST /v1/images/edits`
+- 模型列表接口仍然是 `GET /v1/models`
+- 门户前端调用的接口仍然继续使用 `/portal/api/*`
+- 后台管理前端调用的接口仍然继续使用 `/api/*`
 
 健康检查：
 
@@ -259,6 +296,11 @@ auth_key = "chatgpt2api"
 - `chatgpt2api`
 
 如果你没有修改 `[app].auth_key`，首次进入时直接输入上面的默认密码即可。
+
+默认登录入口：
+
+- 多人门户登录页：`/login`
+- 后台管理登录页：`/admin/login`
 
 如果需要接入 CPA 同步：
 
@@ -439,6 +481,29 @@ $env:RUN_IMAGE_MODE_COMPAT_TESTS = "1"
 - `GET /version`
 - `GET /health`
 
+### 门户接口
+
+说明：
+
+- 多人门户页面已经迁到根目录 `/`
+- 但门户接口前缀仍然保持 `/portal/api`
+- 这样前端调用、现有脚本和排障命令都不需要改
+
+- `POST /portal/api/register`
+- `POST /portal/api/register/code`
+- `POST /portal/api/login`
+- `POST /portal/api/logout`
+- `GET /portal/api/me`
+- `GET /portal/api/workspace/bootstrap`
+- `GET /portal/api/workspace/accounts/{id}/quota`
+- `GET /portal/api/gallery/works`
+- `POST /portal/api/gallery/works`
+- `GET /portal/api/gallery/works/{id}`
+- `POST /portal/api/gallery/works/{id}/likes/toggle`
+- `POST /portal/api/gallery/works/{id}/comments`
+- `GET /portal/api/admin/users`
+- `PATCH /portal/api/admin/users/{id}`
+
 ### 账号管理
 
 - `GET /api/accounts`
@@ -477,6 +542,11 @@ $env:RUN_IMAGE_MODE_COMPAT_TESTS = "1"
 - `DELETE /api/image/conversations/{id}`
 
 ### 图片接口
+
+说明：
+
+- 第三方客户端仍然只需要服务根地址，例如 `https://your-domain.example.com`
+- 本次页面路由调整不会影响这些 OpenAI 兼容接口
 
 - `POST /v1/images/generations`
 - `POST /v1/images/edits`
