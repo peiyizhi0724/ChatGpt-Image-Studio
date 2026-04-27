@@ -4,8 +4,10 @@ import ImagePage from "@/app/image/page";
 import AppShell from "@/app/layout";
 import LoginPage from "@/app/login/page";
 import HomePage from "@/app/page";
+import GalleryPage from "@/app/gallery/page";
 import RegisterPage from "@/app/register/page";
 import UsersPage from "@/app/users/page";
+import WorksPage from "@/app/works/page";
 import { RequirePortalAdmin, RequirePortalAuth } from "@/components/portal-route";
 
 export default function App() {
@@ -20,6 +22,22 @@ export default function App() {
           element={
             <RequirePortalAuth>
               <ImagePage />
+            </RequirePortalAuth>
+          }
+        />
+        <Route
+          path="/works"
+          element={
+            <RequirePortalAuth>
+              <WorksPage />
+            </RequirePortalAuth>
+          }
+        />
+        <Route
+          path="/gallery"
+          element={
+            <RequirePortalAuth>
+              <GalleryPage />
             </RequirePortalAuth>
           }
         />

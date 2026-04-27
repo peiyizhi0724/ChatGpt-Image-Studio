@@ -204,6 +204,7 @@ func (s *Server) handleImageChatCompletions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	s.recordPortalUsage(r, 1, len(compatResponseDataItems(payload)))
 	writeJSON(w, http.StatusOK, buildCompatChatCompletionResponse(firstNonEmpty(strings.TrimSpace(req.Model), "gpt-image-2"), payload))
 }
 
@@ -243,6 +244,7 @@ func (s *Server) handleImageResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.recordPortalUsage(r, 1, len(compatResponseDataItems(payload)))
 	writeJSON(w, http.StatusOK, buildCompatResponsesResponse(firstNonEmpty(strings.TrimSpace(req.Model), "gpt-image-2"), payload))
 }
 

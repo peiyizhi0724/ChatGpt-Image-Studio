@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"chatgpt2api/internal/mailer"
 	"chatgpt2api/internal/middleware"
 	"chatgpt2api/internal/newapi"
+	"chatgpt2api/internal/portalstore"
 	"chatgpt2api/internal/sub2api"
 	"chatgpt2api/internal/users"
 	"chatgpt2api/internal/verification"
@@ -42,6 +44,8 @@ type Server struct {
 	accountRefreshRun      *accountRefreshRunResult
 	staticDir              string
 	portalStaticDir        string
+	portalStore            *portalstore.Store
+	portalStoreErr         error
 	reqLogs                *imageRequestLogStore
 	mailer                 *mailer.Sender
 	verifier               *verification.Store
@@ -87,6 +91,10 @@ func (e *requestError) Error() string {
 func NewServer(cfg *config.Config, store *accounts.Store, userStore *users.Store, syncClient *cliproxy.Client) *Server {
 	codeTTLMinutes := max(1, cfg.Mail.CodeTTLMinutes)
 	resendIntervalSeconds := max(1, cfg.Mail.ResendInterval)
+	portalStore, portalStoreErr := portalstore.NewStore(cfg)
+	if portalStoreErr != nil {
+		slog.Warn("portal store init failed", slog.Any("error", portalStoreErr))
+	}
 
 	return &Server{
 		cfg:             cfg,
@@ -96,6 +104,8 @@ func NewServer(cfg *config.Config, store *accounts.Store, userStore *users.Store
 		syncRunCache:    map[string]*sourceSyncRunResult{},
 		staticDir:       cfg.ResolvePath(cfg.Server.StaticDir),
 		portalStaticDir: cfg.ResolvePath("portal-static"),
+		portalStore:     portalStore,
+		portalStoreErr:  portalStoreErr,
 		reqLogs:         newImageRequestLogStore(),
 		mailer:          mailer.NewSender(cfg.Mail),
 		verifier: verification.NewStore(
@@ -401,6 +411,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /portal/api/me", s.requirePortalUser(http.HandlerFunc(s.handlePortalMe)))
 	mux.Handle("GET /portal/api/workspace/bootstrap", s.requirePortalUser(http.HandlerFunc(s.handlePortalWorkspaceBootstrap)))
 	mux.Handle("GET /portal/api/workspace/accounts/{id}/quota", s.requirePortalUser(http.HandlerFunc(s.handlePortalAccountQuota)))
+	mux.Handle("GET /portal/api/gallery/works", s.requirePortalUser(http.HandlerFunc(s.handlePortalGalleryWorks)))
+	mux.Handle("POST /portal/api/gallery/works", s.requirePortalUser(http.HandlerFunc(s.handlePortalPublishGalleryWork)))
+	mux.Handle("GET /portal/api/gallery/works/{id}", s.requirePortalUser(http.HandlerFunc(s.handlePortalGalleryWork)))
+	mux.Handle("POST /portal/api/gallery/works/{id}/likes/toggle", s.requirePortalUser(http.HandlerFunc(s.handlePortalToggleGalleryLike)))
+	mux.Handle("POST /portal/api/gallery/works/{id}/comments", s.requirePortalUser(http.HandlerFunc(s.handlePortalCreateGalleryComment)))
 	mux.Handle("GET /portal/api/admin/users", s.requirePortalAdmin(http.HandlerFunc(s.handlePortalAdminUsers)))
 	mux.Handle("PATCH /portal/api/admin/users/{id}", s.requirePortalAdmin(http.HandlerFunc(s.handlePortalAdminUpdateUser)))
 
@@ -860,6 +875,7 @@ func (s *Server) handleImageGenerations(w http.ResponseWriter, r *http.Request) 
 		writeImageRequestError(w, err)
 		return
 	}
+	s.recordPortalUsage(r, 1, len(compatResponseDataItems(payload)))
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -944,6 +960,7 @@ func (s *Server) handleImageEdits(w http.ResponseWriter, r *http.Request) {
 		writeImageRequestError(w, err)
 		return
 	}
+	s.recordPortalUsage(r, 1, len(data))
 	writeJSON(w, http.StatusOK, map[string]any{"created": time.Now().Unix(), "data": data})
 }
 
@@ -1868,6 +1885,37 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (s *Server) portalGalleryStore() (*portalstore.Store, error) {
+	if s == nil {
+		return nil, fmt.Errorf("portal store is unavailable")
+	}
+	if s.portalStoreErr != nil {
+		return nil, s.portalStoreErr
+	}
+	if s.portalStore == nil {
+		return nil, fmt.Errorf("portal store is unavailable")
+	}
+	return s.portalStore, nil
+}
+
+func (s *Server) recordPortalUsage(r *http.Request, imageRequests, generatedImages int) {
+	if r == nil {
+		return
+	}
+	user, ok := s.portalUserFromRequest(r)
+	if !ok {
+		return
+	}
+	store, err := s.portalGalleryStore()
+	if err != nil {
+		slog.Warn("portal usage store unavailable", slog.Any("error", err))
+		return
+	}
+	if err := store.IncrementUsage(r.Context(), user.ID, imageRequests, generatedImages, 0); err != nil {
+		slog.Warn("record portal usage failed", slog.String("user_id", user.ID), slog.Any("error", err))
+	}
 }
 
 func stringValue(value any) string {

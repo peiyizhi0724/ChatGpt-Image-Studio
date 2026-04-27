@@ -7,12 +7,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"chatgpt2api/internal/accounts"
+	"chatgpt2api/internal/portalstore"
 	"chatgpt2api/internal/users"
 	"chatgpt2api/internal/verification"
 )
@@ -26,13 +29,20 @@ type portalContextKey string
 
 const portalUserContextKey portalContextKey = "portal_user"
 
+type portalUserUsageResponse struct {
+	ImageRequests   int `json:"image_requests"`
+	GeneratedImages int `json:"generated_images"`
+	PublishedWorks  int `json:"published_works"`
+}
+
 type portalUserResponse struct {
-	ID          string `json:"id"`
-	Email       string `json:"email"`
-	Role        string `json:"role"`
-	Disabled    bool   `json:"disabled"`
-	CreatedAt   string `json:"created_at"`
-	LastLoginAt string `json:"last_login_at,omitempty"`
+	ID          string                  `json:"id"`
+	Email       string                  `json:"email"`
+	Role        string                  `json:"role"`
+	Disabled    bool                    `json:"disabled"`
+	CreatedAt   string                  `json:"created_at"`
+	LastLoginAt string                  `json:"last_login_at,omitempty"`
+	Usage       portalUserUsageResponse `json:"usage"`
 }
 
 type portalQuotaSummary struct {
@@ -115,7 +125,7 @@ func (s *Server) handlePortalRegister(w http.ResponseWriter, r *http.Request) {
 	s.verifier.Consume(body.Email)
 	s.setPortalSessionCookie(w, r, user.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"user":  user,
+		"user":  s.decoratePortalUser(r.Context(), user),
 		"quota": s.buildPortalQuotaSummary(),
 	})
 }
@@ -138,7 +148,7 @@ func (s *Server) handlePortalLogin(w http.ResponseWriter, r *http.Request) {
 
 	s.setPortalSessionCookie(w, r, user.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user":  user,
+		"user":  s.decoratePortalUser(r.Context(), user),
 		"quota": s.buildPortalQuotaSummary(),
 	})
 }
@@ -155,7 +165,7 @@ func (s *Server) handlePortalMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user":  user,
+		"user":  s.decoratePortalUser(r.Context(), user),
 		"quota": s.buildPortalQuotaSummary(),
 	})
 }
@@ -174,7 +184,7 @@ func (s *Server) handlePortalWorkspaceBootstrap(w http.ResponseWriter, r *http.R
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user":     user,
+		"user":     s.decoratePortalUser(r.Context(), user),
 		"quota":    s.buildPortalQuotaSummary(),
 		"accounts": s.buildPortalWorkspaceAccounts(items),
 		"workspace": map[string]any{
@@ -238,7 +248,7 @@ func (s *Server) handlePortalAdminUsers(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": items,
+		"items": s.decoratePortalUsers(r.Context(), items),
 		"quota": s.buildPortalQuotaSummary(),
 	})
 }
@@ -269,8 +279,151 @@ func (s *Server) handlePortalAdminUpdateUser(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"item":  user,
+		"item":  s.decoratePortalUser(r.Context(), user),
 		"quota": s.buildPortalQuotaSummary(),
+	})
+}
+
+func (s *Server) handlePortalGalleryWorks(w http.ResponseWriter, r *http.Request) {
+	user, ok := portalUserFromContext(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+	store, err := s.portalGalleryStore()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	items, err := store.ListWorks(r.Context(), portalstore.GalleryListOptions{
+		ViewerUserID: user.ID,
+		Search:       strings.TrimSpace(r.URL.Query().Get("query")),
+		Sort:         strings.TrimSpace(r.URL.Query().Get("sort")),
+	})
+	if err != nil {
+		writeJSON(w, statusForPortalGalleryError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handlePortalGalleryWork(w http.ResponseWriter, r *http.Request) {
+	user, ok := portalUserFromContext(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+	store, err := s.portalGalleryStore()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	item, comments, err := store.GetWork(r.Context(), r.PathValue("id"), user.ID)
+	if err != nil {
+		writeJSON(w, statusForPortalGalleryError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"item":     item,
+		"comments": comments,
+	})
+}
+
+func (s *Server) handlePortalPublishGalleryWork(w http.ResponseWriter, r *http.Request) {
+	user, ok := portalUserFromContext(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+	store, err := s.portalGalleryStore()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	var body struct {
+		Title        string `json:"title"`
+		Prompt       string `json:"prompt"`
+		ImageDataURL string `json:"image_data_url"`
+		ImageURL     string `json:"image_url"`
+		Model        string `json:"model"`
+		Size         string `json:"size"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+		return
+	}
+
+	item, err := store.PublishWork(r.Context(), portalstore.PublishInput{
+		UserID:       user.ID,
+		UserEmail:    user.Email,
+		Title:        body.Title,
+		Prompt:       body.Prompt,
+		ImageDataURL: body.ImageDataURL,
+		ImageURL:     body.ImageURL,
+		Model:        body.Model,
+		Size:         body.Size,
+	})
+	if err != nil {
+		writeJSON(w, statusForPortalGalleryError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"item": item})
+}
+
+func (s *Server) handlePortalToggleGalleryLike(w http.ResponseWriter, r *http.Request) {
+	user, ok := portalUserFromContext(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+	store, err := s.portalGalleryStore()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	result, err := store.ToggleLike(r.Context(), r.PathValue("id"), user.ID)
+	if err != nil {
+		writeJSON(w, statusForPortalGalleryError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"liked":      result.Liked,
+		"like_count": result.LikeCount,
+	})
+}
+
+func (s *Server) handlePortalCreateGalleryComment(w http.ResponseWriter, r *http.Request) {
+	user, ok := portalUserFromContext(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+	store, err := s.portalGalleryStore()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+		return
+	}
+
+	item, commentCount, err := store.AddComment(r.Context(), r.PathValue("id"), user, body.Content)
+	if err != nil {
+		writeJSON(w, statusForPortalGalleryError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"item":          item,
+		"comment_count": commentCount,
 	})
 }
 
@@ -417,6 +570,59 @@ func (s *Server) buildPortalWorkspaceAccounts(items []accounts.PublicAccount) []
 	return result
 }
 
+func (s *Server) decoratePortalUser(ctx context.Context, user users.PublicUser) portalUserResponse {
+	usage := s.portalUsageMap(ctx)[user.ID]
+	return portalUserResponse{
+		ID:          user.ID,
+		Email:       user.Email,
+		Role:        user.Role,
+		Disabled:    user.Disabled,
+		CreatedAt:   user.CreatedAt,
+		LastLoginAt: user.LastLoginAt,
+		Usage: portalUserUsageResponse{
+			ImageRequests:   usage.ImageRequests,
+			GeneratedImages: usage.GeneratedImages,
+			PublishedWorks:  usage.PublishedWorks,
+		},
+	}
+}
+
+func (s *Server) decoratePortalUsers(ctx context.Context, items []users.PublicUser) []portalUserResponse {
+	usageMap := s.portalUsageMap(ctx)
+	result := make([]portalUserResponse, 0, len(items))
+	for _, item := range items {
+		usage := usageMap[item.ID]
+		result = append(result, portalUserResponse{
+			ID:          item.ID,
+			Email:       item.Email,
+			Role:        item.Role,
+			Disabled:    item.Disabled,
+			CreatedAt:   item.CreatedAt,
+			LastLoginAt: item.LastLoginAt,
+			Usage: portalUserUsageResponse{
+				ImageRequests:   usage.ImageRequests,
+				GeneratedImages: usage.GeneratedImages,
+				PublishedWorks:  usage.PublishedWorks,
+			},
+		})
+	}
+	return result
+}
+
+func (s *Server) portalUsageMap(ctx context.Context) map[string]portalstore.UserUsage {
+	store, err := s.portalGalleryStore()
+	if err != nil {
+		slog.Warn("portal usage unavailable", slog.Any("error", err))
+		return map[string]portalstore.UserUsage{}
+	}
+	items, err := store.ListUsage(ctx)
+	if err != nil {
+		slog.Warn("portal usage load failed", slog.Any("error", err))
+		return map[string]portalstore.UserUsage{}
+	}
+	return items
+}
+
 func (s *Server) buildPortalQuotaSummary() portalQuotaSummary {
 	items, err := s.store.ListAccounts()
 	if err != nil {
@@ -457,6 +663,23 @@ func isPortalImageAccountUsable(account accounts.PublicAccount) bool {
 		account.Status != "异常" &&
 		account.Status != "限流" &&
 		getImageRemaining(account) > 0
+}
+
+func statusForPortalGalleryError(err error) int {
+	switch {
+	case err == nil:
+		return http.StatusOK
+	case errors.Is(err, portalstore.ErrNotFound):
+		return http.StatusNotFound
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, token := range []string{"required", "invalid", "too long", "empty", "unavailable"} {
+		if strings.Contains(message, token) {
+			return http.StatusBadRequest
+		}
+	}
+	return http.StatusInternalServerError
 }
 
 func statusForUserError(err error) int {

@@ -26,6 +26,11 @@ export type PortalUser = {
   disabled: boolean;
   created_at: string;
   last_login_at?: string;
+  usage?: {
+    image_requests: number;
+    generated_images: number;
+    published_works: number;
+  };
 };
 
 export type PortalQuotaSummary = {
@@ -52,6 +57,39 @@ export type PortalWorkspaceBootstrapResponse = PortalSessionPayload & {
 export type PortalUsersResponse = {
   items: PortalUser[];
   quota: PortalQuotaSummary;
+};
+
+export type PortalGalleryWork = {
+  id: string;
+  user_id: string;
+  user_email: string;
+  title: string;
+  prompt: string;
+  image_url: string;
+  model: string;
+  size: string;
+  like_count: number;
+  comment_count: number;
+  created_at: string;
+  liked_by_viewer: boolean;
+};
+
+export type PortalGalleryComment = {
+  id: string;
+  work_id: string;
+  user_id: string;
+  user_email: string;
+  content: string;
+  created_at: string;
+};
+
+export type PortalGalleryWorksResponse = {
+  items: PortalGalleryWork[];
+};
+
+export type PortalGalleryWorkResponse = {
+  item: PortalGalleryWork;
+  comments: PortalGalleryComment[];
 };
 
 export type PortalAccountQuotaResponse = {
@@ -152,6 +190,55 @@ export async function updatePortalUser(userId: string, updates: { role?: "admin"
     {
       method: "PATCH",
       body: updates,
+    },
+  );
+}
+
+export async function fetchPortalGalleryWorks(params: { sort?: string; query?: string } = {}) {
+  const search = new URLSearchParams();
+  if (params.sort?.trim()) {
+    search.set("sort", params.sort.trim());
+  }
+  if (params.query?.trim()) {
+    search.set("query", params.query.trim());
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return httpRequest<PortalGalleryWorksResponse>(`/portal/api/gallery/works${suffix}`);
+}
+
+export async function fetchPortalGalleryWork(workId: string) {
+  return httpRequest<PortalGalleryWorkResponse>(`/portal/api/gallery/works/${encodeURIComponent(workId)}`);
+}
+
+export async function publishPortalGalleryWork(payload: {
+  title?: string;
+  prompt: string;
+  image_data_url?: string;
+  image_url?: string;
+  model?: string;
+  size?: string;
+}) {
+  return httpRequest<{ item: PortalGalleryWork }>("/portal/api/gallery/works", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function togglePortalGalleryLike(workId: string) {
+  return httpRequest<{ liked: boolean; like_count: number }>(
+    `/portal/api/gallery/works/${encodeURIComponent(workId)}/likes/toggle`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function createPortalGalleryComment(workId: string, content: string) {
+  return httpRequest<{ item: PortalGalleryComment; comment_count: number }>(
+    `/portal/api/gallery/works/${encodeURIComponent(workId)}/comments`,
+    {
+      method: "POST",
+      body: { content },
     },
   );
 }

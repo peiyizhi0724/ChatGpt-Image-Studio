@@ -82,10 +82,12 @@ func main() {
 	if err != nil {
 		fatalStartup(logger, paths, "初始化账号存储失败", err)
 	}
+	defer store.Close()
 	userStore, err := users.NewStore(cfg)
 	if err != nil {
 		fatalStartup(logger, paths, "初始化用户存储失败", err)
 	}
+	defer userStore.Close()
 
 	syncTimeout := time.Duration(max(10, cfg.Sync.RequestTimeout)) * time.Second
 	syncClient := cliproxy.New(cfg.Sync.Enabled, cfg.Sync.BaseURL, cfg.Sync.ManagementKey, cfg.Sync.ProviderType, syncTimeout, cfg.SyncProxyURL())

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LoaderCircle, ShieldCheck, ShieldX, UserCog, Users } from "lucide-react";
+import { BarChart3, LoaderCircle, ShieldCheck, ShieldX, Sparkles, Upload, UserCog, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,14 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
+function getUserUsage(user: PortalUser) {
+  return {
+    imageRequests: user.usage?.image_requests ?? 0,
+    generatedImages: user.usage?.generated_images ?? 0,
+    publishedWorks: user.usage?.published_works ?? 0,
+  };
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<PortalUser[]>([]);
   const [quota, setQuota] = useState<PortalQuotaSummary | null>(null);
@@ -32,6 +40,9 @@ export default function UsersPage() {
 
   const enabledUsers = useMemo(() => users.filter((item) => !item.disabled).length, [users]);
   const adminUsers = useMemo(() => users.filter((item) => item.role === "admin").length, [users]);
+  const totalGeneratedImages = useMemo(() => users.reduce((sum, item) => sum + getUserUsage(item).generatedImages, 0), [users]);
+  const totalImageRequests = useMemo(() => users.reduce((sum, item) => sum + getUserUsage(item).imageRequests, 0), [users]);
+  const totalPublishedWorks = useMemo(() => users.reduce((sum, item) => sum + getUserUsage(item).publishedWorks, 0), [users]);
 
   const loadUsers = async () => {
     setIsLoading(true);
@@ -68,7 +79,7 @@ export default function UsersPage() {
 
   return (
     <section className="flex h-full min-h-0 flex-col gap-3">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
           <div className="flex items-center gap-3 text-stone-500">
             <Users className="size-5" />
@@ -85,6 +96,33 @@ export default function UsersPage() {
           </div>
           <div className="mt-4 text-3xl font-semibold tracking-tight text-stone-950">{adminUsers}</div>
           <div className="mt-2 text-sm text-stone-500">首个注册用户默认为管理员</div>
+        </div>
+
+        <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
+          <div className="flex items-center gap-3 text-stone-500">
+            <Sparkles className="size-5" />
+            <span className="text-sm font-medium">累计生成</span>
+          </div>
+          <div className="mt-4 text-3xl font-semibold tracking-tight text-stone-950">{totalGeneratedImages}</div>
+          <div className="mt-2 text-sm text-stone-500">按实际返回图片张数累计</div>
+        </div>
+
+        <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
+          <div className="flex items-center gap-3 text-stone-500">
+            <BarChart3 className="size-5" />
+            <span className="text-sm font-medium">图片请求</span>
+          </div>
+          <div className="mt-4 text-3xl font-semibold tracking-tight text-stone-950">{totalImageRequests}</div>
+          <div className="mt-2 text-sm text-stone-500">生成、编辑等任务请求次数</div>
+        </div>
+
+        <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
+          <div className="flex items-center gap-3 text-stone-500">
+            <Upload className="size-5" />
+            <span className="text-sm font-medium">已发布作品</span>
+          </div>
+          <div className="mt-4 text-3xl font-semibold tracking-tight text-stone-950">{totalPublishedWorks}</div>
+          <div className="mt-2 text-sm text-stone-500">已经进入作品广场的图片数量</div>
         </div>
 
         <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
@@ -132,6 +170,7 @@ export default function UsersPage() {
                   <th className="px-6 py-4 font-medium">邮箱</th>
                   <th className="px-6 py-4 font-medium">角色</th>
                   <th className="px-6 py-4 font-medium">状态</th>
+                  <th className="px-6 py-4 font-medium">使用量</th>
                   <th className="px-6 py-4 font-medium">注册时间</th>
                   <th className="px-6 py-4 font-medium">最近登录</th>
                   <th className="px-6 py-4 font-medium">操作</th>
@@ -140,6 +179,7 @@ export default function UsersPage() {
               <tbody>
                 {users.map((user) => {
                   const pending = pendingUserId === user.id;
+                  const usage = getUserUsage(user);
                   return (
                     <tr key={user.id} className="border-t border-stone-100 align-top">
                       <td className="px-6 py-4">
@@ -159,6 +199,10 @@ export default function UsersPage() {
                         >
                           {user.disabled ? "已停用" : "正常"}
                         </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="font-medium text-stone-950">生成 {usage.generatedImages}</div>
+                        <div className="mt-1 text-xs text-stone-500">请求 {usage.imageRequests} · 发布 {usage.publishedWorks}</div>
                       </td>
                       <td className="px-6 py-4 text-stone-600">{formatDate(user.created_at)}</td>
                       <td className="px-6 py-4 text-stone-600">{formatDate(user.last_login_at)}</td>

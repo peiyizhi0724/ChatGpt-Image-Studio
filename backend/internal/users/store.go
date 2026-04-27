@@ -1,12 +1,8 @@
 package users
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/mail"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -24,11 +20,11 @@ const (
 )
 
 var (
-	ErrNotFound           = errors.New("user not found")
-	ErrEmailExists        = errors.New("email already exists")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrUserDisabled       = errors.New("user is disabled")
-	ErrLastAdminRequired  = errors.New("at least one enabled admin is required")
+	ErrNotFound           = fmt.Errorf("user not found")
+	ErrEmailExists        = fmt.Errorf("email already exists")
+	ErrInvalidCredentials = fmt.Errorf("invalid email or password")
+	ErrUserDisabled       = fmt.Errorf("user is disabled")
+	ErrLastAdminRequired  = fmt.Errorf("at least one enabled admin is required")
 )
 
 type Record struct {
@@ -55,33 +51,43 @@ type Update struct {
 	Disabled *bool
 }
 
-type envelope struct {
-	Users []Record `json:"users"`
+type storageBackend interface {
+	Init() error
+	Close() error
+	Load() ([]Record, error)
+	Save([]Record) error
 }
 
 type Store struct {
-	path  string
+	backend storageBackend
+
 	mu    sync.RWMutex
 	users map[string]Record
 }
 
 func NewStore(cfg *config.Config) (*Store, error) {
-	path := cfg.ResolvePath(cfg.Storage.UsersFile)
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("storage.users_file is required")
+	backend := newStorageBackend(cfg)
+	if err := backend.Init(); err != nil {
+		_ = backend.Close()
+		return nil, err
 	}
 
 	store := &Store{
-		path:  path,
-		users: map[string]Record{},
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
+		backend: backend,
+		users:   map[string]Record{},
 	}
 	if err := store.load(); err != nil {
+		_ = backend.Close()
 		return nil, err
 	}
 	return store, nil
+}
+
+func (s *Store) Close() error {
+	if s == nil || s.backend == nil {
+		return nil
+	}
+	return s.backend.Close()
 }
 
 func (s *Store) Register(email, password string) (PublicUser, error) {
@@ -231,49 +237,52 @@ func (s *Store) EmailExists(email string) bool {
 	return s.findByEmailLocked(normalizedEmail) != nil
 }
 
-func (s *Store) load() error {
-	raw, err := os.ReadFile(s.path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	if len(raw) == 0 {
-		return nil
-	}
+func (s *Store) Snapshot() ([]Record, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneSortedRecords(recordsFromMap(s.users)), nil
+}
 
-	var payload envelope
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return err
-	}
-
-	for _, item := range payload.Users {
-		item.Email = strings.ToLower(strings.TrimSpace(item.Email))
-		item.Role = normalizeRole(item.Role)
-		if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.Email) == "" {
+func (s *Store) ReplaceAll(records []Record) error {
+	nextUsers := map[string]Record{}
+	for _, item := range cloneSortedRecords(records) {
+		normalized, ok := normalizeRecord(item)
+		if !ok {
 			continue
 		}
-		s.users[item.ID] = item
+		nextUsers[normalized.ID] = normalized
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previous := s.users
+	s.users = nextUsers
+	if err := s.saveLocked(); err != nil {
+		s.users = previous
+		return err
+	}
+	return nil
+}
+
+func (s *Store) load() error {
+	records, err := s.backend.Load()
+	if err != nil {
+		return err
+	}
+
+	for _, item := range records {
+		normalized, ok := normalizeRecord(item)
+		if !ok {
+			continue
+		}
+		s.users[normalized.ID] = normalized
 	}
 	return nil
 }
 
 func (s *Store) saveLocked() error {
-	items := make([]Record, 0, len(s.users))
-	for _, item := range s.users {
-		items = append(items, item)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt < items[j].CreatedAt
-	})
-
-	payload := envelope{Users: items}
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.path, append(data, '\n'), 0o644)
+	return s.backend.Save(recordsFromMap(s.users))
 }
 
 func (s *Store) findByEmailLocked(email string) *Record {
@@ -319,6 +328,42 @@ func toPublicUser(record Record) PublicUser {
 		CreatedAt:   record.CreatedAt,
 		LastLoginAt: record.LastLoginAt,
 	}
+}
+
+func normalizeRecord(item Record) (Record, bool) {
+	item.ID = strings.TrimSpace(item.ID)
+	item.Email = strings.ToLower(strings.TrimSpace(item.Email))
+	item.Role = normalizeRole(item.Role)
+	item.PasswordHash = strings.TrimSpace(item.PasswordHash)
+	item.CreatedAt = strings.TrimSpace(item.CreatedAt)
+	item.LastLoginAt = strings.TrimSpace(item.LastLoginAt)
+	if item.ID == "" || item.Email == "" {
+		return Record{}, false
+	}
+	return item, true
+}
+
+func recordsFromMap(items map[string]Record) []Record {
+	result := make([]Record, 0, len(items))
+	for _, item := range items {
+		result = append(result, item)
+	}
+	return cloneSortedRecords(result)
+}
+
+func cloneSortedRecords(items []Record) []Record {
+	result := make([]Record, 0, len(items))
+	for _, item := range items {
+		normalized, ok := normalizeRecord(item)
+		if !ok {
+			continue
+		}
+		result = append(result, normalized)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt < result[j].CreatedAt
+	})
+	return result
 }
 
 func normalizeEmail(value string) (string, error) {

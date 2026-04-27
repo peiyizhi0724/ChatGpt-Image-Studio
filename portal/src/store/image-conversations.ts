@@ -2,7 +2,7 @@
 
 import localforage from "localforage";
 
-import type { ImageModel } from "@/lib/api";
+import type { ImageModel, ImageQuality } from "@/lib/api";
 
 export type ImageMode = "generate" | "edit" | "upscale";
 
@@ -10,13 +10,15 @@ export type StoredSourceImage = {
   id: string;
   role: "image" | "mask";
   name: string;
-  dataUrl: string;
+  dataUrl?: string;
+  url?: string;
 };
 
 export type StoredImage = {
   id: string;
   status?: "loading" | "success" | "error";
   b64_json?: string;
+  url?: string;
   revised_prompt?: string;
   file_id?: string;
   gen_id?: string;
@@ -35,6 +37,8 @@ export type ImageConversationTurn = {
   prompt: string;
   model: ImageModel;
   count: number;
+  size?: string;
+  quality?: ImageQuality;
   scale?: string;
   sourceImages?: StoredSourceImage[];
   images: StoredImage[];
@@ -50,6 +54,8 @@ export type ImageConversation = {
   prompt: string;
   model: ImageModel;
   count: number;
+  size?: string;
+  quality?: ImageQuality;
   scale?: string;
   sourceImages?: StoredSourceImage[];
   images: StoredImage[];
@@ -108,7 +114,7 @@ function normalizeStoredImage(image: StoredImage): StoredImage {
   }
   return {
     ...image,
-    status: image.b64_json ? "success" : "loading",
+    status: image.b64_json || image.url ? "success" : "loading",
   };
 }
 
@@ -133,6 +139,8 @@ export function normalizeConversation(conversation: ImageConversation): ImageCon
             prompt: conversation.prompt,
             model: conversation.model,
             count: conversation.count,
+            size: conversation.size,
+            quality: conversation.quality,
             scale: conversation.scale,
             sourceImages: conversation.sourceImages,
             images: conversation.images || [],
@@ -150,6 +158,8 @@ export function normalizeConversation(conversation: ImageConversation): ImageCon
     prompt: latestTurn.prompt,
     model: latestTurn.model,
     count: latestTurn.count,
+    size: latestTurn.size,
+    quality: latestTurn.quality,
     scale: latestTurn.scale,
     sourceImages: latestTurn.sourceImages,
     images: latestTurn.images,

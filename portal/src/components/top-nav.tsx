@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Users } from "lucide-react";
+import { Images, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Users } from "lucide-react";
 
 import { fetchVersionInfo } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -51,6 +51,8 @@ export function TopNav() {
 
   const navItems = [
     { href: "/workspace", label: "图片工作台", description: "生成、编辑与放大", icon: Sparkles, visible: true },
+    { href: "/works", label: "我的作品", description: "本地历史与发布入口", icon: Images, visible: true },
+    { href: "/gallery", label: "作品广场", description: "服务器保存的共享作品", icon: LayoutGrid, visible: true },
     { href: "/admin/users", label: "用户管理", description: "角色、启停与总额度", icon: Users, visible: user?.role === "admin" },
   ].filter((item) => item.visible);
 

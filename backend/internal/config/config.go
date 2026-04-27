@@ -79,7 +79,6 @@ type StorageConfig struct {
 	StateFile                string `toml:"state_file"`
 	SyncStateDir             string `toml:"sync_state_dir"`
 	ImageDir                 string `toml:"image_dir"`
-	UsersFile                string `toml:"users_file"`
 	ImageStorage             string `toml:"image_storage"`
 	ImageConversationStorage string `toml:"image_conversation_storage"`
 	ImageDataStorage         string `toml:"image_data_storage"`
