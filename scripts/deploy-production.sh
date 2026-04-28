@@ -18,6 +18,49 @@ normalize_healthcheck_url() {
   esac
 }
 
+docker_registry_ready() {
+  getent hosts registry-1.docker.io >/dev/null 2>&1 || return 1
+  curl -sSI --max-time 10 https://registry-1.docker.io/v2/ \
+    | head -n 1 \
+    | grep -Eq 'HTTP/[0-9.]+ (200|401)' || return 1
+}
+
+restart_warp_if_available() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! systemctl list-unit-files warp-svc.service >/dev/null 2>&1; then
+    return 1
+  fi
+
+  echo "[deploy] restarting warp-svc to recover DNS/registry access"
+  systemctl restart warp-svc
+}
+
+ensure_docker_registry_ready() {
+  if docker_registry_ready; then
+    return 0
+  fi
+
+  echo "[deploy] docker registry preflight failed"
+  if command -v ss >/dev/null 2>&1; then
+    echo "[deploy] udp sockets: $(ss -u -a -n | wc -l)"
+  fi
+
+  if restart_warp_if_available; then
+    sleep 3
+  fi
+
+  if docker_registry_ready; then
+    echo "[deploy] docker registry preflight recovered"
+    return 0
+  fi
+
+  echo "[deploy] docker registry preflight still failing" >&2
+  return 1
+}
+
 dump_diagnostics() {
   echo "[deploy] dumping diagnostics"
   docker compose ps || true
@@ -66,6 +109,8 @@ git fetch origin "$DEPLOY_BRANCH"
 git checkout -B "$DEPLOY_BRANCH"
 git branch --set-upstream-to="origin/$DEPLOY_BRANCH" "$DEPLOY_BRANCH" >/dev/null 2>&1 || true
 git reset --hard "origin/$DEPLOY_BRANCH"
+
+ensure_docker_registry_ready
 
 docker compose up -d --build
 
