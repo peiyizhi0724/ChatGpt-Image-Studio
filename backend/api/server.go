@@ -114,12 +114,7 @@ func NewServer(cfg *config.Config, store *accounts.Store, userStore *users.Store
 		),
 		imageAdmission: newImageAdmissionController(),
 		officialClientFactory: func(accessToken, proxyURL string, authData map[string]any, requestConfig handler.ImageRequestConfig) imageWorkflowClient {
-			return handler.NewChatGPTClientWithProxyAndConfig(
-				accessToken,
-				firstNonEmpty(stringValue(authData["cookies"]), stringValue(authData["cookie"])),
-				proxyURL,
-				requestConfig,
-			)
+			return handler.NewChatGPTClientWithProxyAndAuthData(accessToken, proxyURL, authData, requestConfig)
 		},
 		responsesClientFactory: func(accessToken, proxyURL string, authData map[string]any, requestConfig handler.ImageRequestConfig) imageWorkflowClient {
 			return handler.NewResponsesClientWithProxyAndConfig(accessToken, proxyURL, authData, requestConfig)
@@ -1080,12 +1075,7 @@ func (s *Server) newOfficialWorkflowClient(accessToken string, authData map[stri
 	if s != nil && s.officialClientFactory != nil {
 		return s.officialClientFactory(accessToken, s.cfg.ChatGPTProxyURL(), authData, s.imageRequestConfig())
 	}
-	return handler.NewChatGPTClientWithProxyAndConfig(
-		accessToken,
-		firstNonEmpty(stringValue(authData["cookies"]), stringValue(authData["cookie"])),
-		s.cfg.ChatGPTProxyURL(),
-		s.imageRequestConfig(),
-	)
+	return handler.NewChatGPTClientWithProxyAndAuthData(accessToken, s.cfg.ChatGPTProxyURL(), authData, s.imageRequestConfig())
 }
 
 func (s *Server) newResponsesWorkflowClient(accessToken string, authData map[string]any) imageWorkflowClient {

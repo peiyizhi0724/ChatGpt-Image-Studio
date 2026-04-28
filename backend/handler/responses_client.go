@@ -57,12 +57,7 @@ func NewResponsesClientWithProxy(accessToken, proxyURL string, authData map[stri
 
 func NewResponsesClientWithProxyAndConfig(accessToken, proxyURL string, authData map[string]any, requestConfig ImageRequestConfig) *ResponsesClient {
 	requestConfig = normalizeImageRequestConfig(requestConfig)
-	backend := NewChatGPTClientWithProxyAndConfig(
-		accessToken,
-		firstString(authData, "cookies", "cookie"),
-		proxyURL,
-		requestConfig,
-	)
+	backend := NewChatGPTClientWithProxyAndAuthData(accessToken, proxyURL, authData, requestConfig)
 	return &ResponsesClient{
 		backend:   backend,
 		accountID: resolveChatGPTAccountID(accessToken, authData),

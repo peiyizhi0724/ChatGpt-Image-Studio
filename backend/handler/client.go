@@ -67,15 +67,20 @@ type ImageResult struct {
 }
 
 type ChatGPTClient struct {
-	accessToken    string
-	cookies        string
-	oaiDeviceID    string
-	httpClient     *http.Client
-	streamClient   *http.Client
-	proxyURL       string
-	pollInterval   time.Duration
-	pollMaxWait    time.Duration
-	lastImageRoute string
+	accessToken     string
+	cookies         string
+	oaiDeviceID     string
+	oaiSessionID    string
+	userAgent       string
+	secCHUA         string
+	secCHUAMobile   string
+	secCHUAPlatform string
+	httpClient      *http.Client
+	streamClient    *http.Client
+	proxyURL        string
+	pollInterval    time.Duration
+	pollMaxWait     time.Duration
+	lastImageRoute  string
 }
 
 func NewChatGPTClient(accessToken, cookies string) *ChatGPTClient {
@@ -87,12 +92,31 @@ func NewChatGPTClientWithProxy(accessToken, cookies, proxyURL string) *ChatGPTCl
 }
 
 func NewChatGPTClientWithProxyAndConfig(accessToken, cookies, proxyURL string, requestConfig ImageRequestConfig) *ChatGPTClient {
+	authData := map[string]any{}
+	if strings.TrimSpace(cookies) != "" {
+		authData["cookies"] = strings.TrimSpace(cookies)
+	}
+	return NewChatGPTClientWithProxyAndAuthData(accessToken, proxyURL, authData, requestConfig)
+}
+
+func NewChatGPTClientWithProxyAndAuthData(accessToken, proxyURL string, authData map[string]any, requestConfig ImageRequestConfig) *ChatGPTClient {
 	requestConfig = normalizeImageRequestConfig(requestConfig)
+	cookies := firstString(authData, "cookies", "cookie")
+	userAgent := stringOrDefault(authData, "user-agent", defaultUserAgent)
+	deviceID := firstString(authData, "oai-device-id", "oai_device_id", "device_id")
+	if strings.TrimSpace(deviceID) == "" {
+		deviceID = uuid.NewString()
+	}
 	return &ChatGPTClient{
-		accessToken: accessToken,
-		cookies:     cookies,
-		oaiDeviceID: uuid.NewString(),
-		proxyURL:    strings.TrimSpace(proxyURL),
+		accessToken:     accessToken,
+		cookies:         cookies,
+		oaiDeviceID:     deviceID,
+		oaiSessionID:    firstString(authData, "oai-session-id", "oai_session_id", "session_id"),
+		userAgent:       userAgent,
+		secCHUA:         stringOrDefault(authData, "sec-ch-ua", `"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"`),
+		secCHUAMobile:   stringOrDefault(authData, "sec-ch-ua-mobile", "?0"),
+		secCHUAPlatform: stringOrDefault(authData, "sec-ch-ua-platform", `"Windows"`),
+		proxyURL:        strings.TrimSpace(proxyURL),
 		httpClient: &http.Client{
 			Timeout:   requestConfig.RequestTimeout,
 			Transport: newChromeTransport(proxyURL),
@@ -745,7 +769,7 @@ func (c *ChatGPTClient) doConversationRequest(ctx context.Context, body map[stri
 
 // getSentinelTokens fetches the chat-requirements token and solves PoW if needed.
 func (c *ChatGPTClient) getSentinelTokens(ctx context.Context) (chatToken, proofToken string, err error) {
-	reqToken := generateRequirementsToken()
+	reqToken := generateRequirementsTokenForUserAgent(c.userAgent)
 
 	reqBody, _ := json.Marshal(map[string]string{"p": reqToken})
 	req, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/sentinel/chat-requirements", bytes.NewReader(reqBody))
@@ -779,7 +803,7 @@ func (c *ChatGPTClient) getSentinelTokens(ctx context.Context) (chatToken, proof
 
 	if result.ProofOfWork.Required {
 		log.Printf("[sentinel] solving PoW: seed=%s difficulty=%s", result.ProofOfWork.Seed, result.ProofOfWork.Difficulty)
-		proofToken, err = solvePoW(result.ProofOfWork.Seed, result.ProofOfWork.Difficulty)
+		proofToken, err = solvePoWForUserAgent(result.ProofOfWork.Seed, result.ProofOfWork.Difficulty, c.userAgent)
 		if err != nil {
 			return "", "", fmt.Errorf("solve PoW: %w", err)
 		}
@@ -1067,21 +1091,24 @@ func (c *ChatGPTClient) getDownloadURL(ctx context.Context, fileID, conversation
 
 func (c *ChatGPTClient) setHeaders(req *http.Request) {
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 	req.Header.Set("Authorization", "Bearer "+c.accessToken)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("OAI-Device-Id", c.oaiDeviceID)
-	req.Header.Set("OAI-Language", "en-US")
+	if strings.TrimSpace(c.oaiSessionID) != "" {
+		req.Header.Set("OAI-Session-Id", c.oaiSessionID)
+	}
+	req.Header.Set("OAI-Language", "zh-CN")
 	req.Header.Set("Origin", "https://chatgpt.com")
 	req.Header.Set("Priority", "u=1, i")
 	req.Header.Set("Referer", "https://chatgpt.com/")
-	req.Header.Set("Sec-CH-UA", `"Chromium";v="146", "Google Chrome";v="146", "Not?A_Brand";v="99"`)
-	req.Header.Set("Sec-CH-UA-Mobile", "?0")
-	req.Header.Set("Sec-CH-UA-Platform", `"macOS"`)
+	req.Header.Set("Sec-CH-UA", c.secCHUA)
+	req.Header.Set("Sec-CH-UA-Mobile", c.secCHUAMobile)
+	req.Header.Set("Sec-CH-UA-Platform", c.secCHUAPlatform)
 	req.Header.Set("Sec-Fetch-Dest", "empty")
 	req.Header.Set("Sec-Fetch-Mode", "cors")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	req.Header.Set("User-Agent", defaultUserAgent)
+	req.Header.Set("User-Agent", c.userAgent)
 	if c.cookies != "" {
 		req.Header.Set("Cookie", c.cookies)
 	}

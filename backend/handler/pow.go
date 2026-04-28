@@ -221,7 +221,11 @@ func buildConfig(userAgent string) []any {
 // solvePoW solves the proof-of-work challenge.
 // Returns the proof token string (prefixed with "gAAAAAB").
 func solvePoW(seed, difficulty string) (string, error) {
-	config := buildConfig(defaultUserAgent)
+	return solvePoWForUserAgent(seed, difficulty, defaultUserAgent)
+}
+
+func solvePoWForUserAgent(seed, difficulty, userAgent string) (string, error) {
+	config := buildConfig(resolveUserAgent(userAgent))
 
 	diffBytes, err := hex.DecodeString(difficulty)
 	if err != nil {
@@ -299,7 +303,11 @@ func bytesLE(a, b []byte) bool {
 // generateRequirementsToken creates the "p" token for the chat-requirements request.
 // Uses an easy difficulty "0fffff" with a random seed.
 func generateRequirementsToken() string {
-	config := buildConfig(defaultUserAgent)
+	return generateRequirementsTokenForUserAgent(defaultUserAgent)
+}
+
+func generateRequirementsTokenForUserAgent(userAgent string) string {
+	config := buildConfig(resolveUserAgent(userAgent))
 	seed := randomFloat()
 
 	// Use easy difficulty — just solve with one iteration
@@ -329,6 +337,13 @@ func generateRequirementsToken() string {
 
 	b64 := base64.StdEncoding.EncodeToString(assembled)
 	return "gAAAAAC" + b64
+}
+
+func resolveUserAgent(userAgent string) string {
+	if strings.TrimSpace(userAgent) == "" {
+		return defaultUserAgent
+	}
+	return strings.TrimSpace(userAgent)
 }
 
 func randomFloat() string {

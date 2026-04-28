@@ -360,3 +360,44 @@ func TestNewChatGPTClientWithProxyAndConfigUsesProvidedTimeouts(t *testing.T) {
 		t.Fatalf("poll max wait = %v, want %v", client.pollMaxWait, requestConfig.SSETimeout)
 	}
 }
+
+func TestNewChatGPTClientWithProxyAndAuthDataUsesAuthHeaders(t *testing.T) {
+	client := NewChatGPTClientWithProxyAndAuthData("token", "http://proxy.local", map[string]any{
+		"cookies":            "__Secure-next-auth.session-token=abc",
+		"oai-device-id":      "device-123",
+		"oai-session-id":     "session-456",
+		"user-agent":         "Mozilla/5.0 TestBrowser",
+		"sec-ch-ua":          `"Google Chrome";v="147", "Chromium";v="147"`,
+		"sec-ch-ua-mobile":   "?1",
+		"sec-ch-ua-platform": `"Android"`,
+	}, ImageRequestConfig{})
+
+	req, err := http.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/sentinel/chat-requirements", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	client.setHeaders(req)
+
+	if got := req.Header.Get("Cookie"); got != "__Secure-next-auth.session-token=abc" {
+		t.Fatalf("cookie = %q, want auth cookie", got)
+	}
+	if got := req.Header.Get("OAI-Device-Id"); got != "device-123" {
+		t.Fatalf("device id = %q, want auth device id", got)
+	}
+	if got := req.Header.Get("OAI-Session-Id"); got != "session-456" {
+		t.Fatalf("session id = %q, want auth session id", got)
+	}
+	if got := req.Header.Get("User-Agent"); got != "Mozilla/5.0 TestBrowser" {
+		t.Fatalf("user-agent = %q, want auth user-agent", got)
+	}
+	if got := req.Header.Get("Sec-CH-UA"); got != `"Google Chrome";v="147", "Chromium";v="147"` {
+		t.Fatalf("sec-ch-ua = %q, want auth sec-ch-ua", got)
+	}
+	if got := req.Header.Get("Sec-CH-UA-Mobile"); got != "?1" {
+		t.Fatalf("sec-ch-ua-mobile = %q, want auth sec-ch-ua-mobile", got)
+	}
+	if got := req.Header.Get("Sec-CH-UA-Platform"); got != `"Android"` {
+		t.Fatalf("sec-ch-ua-platform = %q, want auth sec-ch-ua-platform", got)
+	}
+}
