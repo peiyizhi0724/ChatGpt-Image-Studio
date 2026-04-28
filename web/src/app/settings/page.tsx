@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Save,
   Settings2,
+  Stethoscope,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -444,101 +445,101 @@ export default function SettingsPage() {
   };
 
   return (
-    <section className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-1 py-1 sm:gap-6">
-        <div className="sticky top-0 z-30 -mx-1 bg-[#fcfcfb]/96 px-1 pb-3 pt-1 backdrop-blur-sm transition-colors duration-200 dark:bg-[var(--studio-bg)]">
-          <div className="rounded-[30px] border border-stone-200 bg-white/92 px-4 py-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)] transition-colors duration-200 dark:border-[var(--studio-border)] dark:bg-[var(--studio-panel)] sm:px-6 sm:py-5">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
-              <div className="min-w-0">
-                <div className="flex items-start gap-3 sm:gap-4">
-                  <div className="inline-flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-stone-950 text-white shadow-sm sm:size-12 sm:rounded-[18px]">
-                    <Settings2 className="size-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <h1 className="text-xl font-semibold tracking-tight text-stone-950 sm:text-2xl">
-                      配置管理
-                    </h1>
-                  </div>
-                </div>
+    <section className="h-full">
+      <div className="hide-scrollbar h-full min-h-0 overflow-y-auto rounded-[30px] border border-stone-200 bg-[#fcfcfb] px-4 pb-5 pt-0 shadow-[0_14px_40px_rgba(15,23,42,0.05)] transition-colors duration-200 dark:border-[var(--studio-border)] dark:bg-[var(--studio-panel)] sm:px-5 sm:pb-6 sm:pt-0 lg:px-6 lg:pb-7 lg:pt-0">
+        <div className="sticky top-0 z-20 -mx-4 bg-[#fcfcfb] px-4 pt-5 pb-4 transition-colors duration-200 dark:bg-[var(--studio-panel)] sm:-mx-5 sm:px-5 sm:pt-6 sm:pb-4 lg:-mx-6 lg:px-6 lg:pt-7 lg:pb-5">
+          <section className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="inline-flex size-12 items-center justify-center rounded-[18px] bg-stone-950 text-white shadow-sm">
+                <Settings2 className="size-5" />
               </div>
-              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 w-full justify-center rounded-full border-stone-200 bg-white px-3 text-[13px] text-stone-700 shadow-none sm:w-auto"
-                  onClick={() => {
-                    window.location.href = "/startup-check";
-                  }}
-                  disabled={isLoading || isSaving}
-                >
-                  启动体检
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 w-full justify-center rounded-full border-stone-200 bg-white px-3 text-[13px] text-stone-700 shadow-none sm:w-auto"
-                  onClick={() => void loadConfig()}
-                  disabled={isLoading || isSaving}
-                >
-                  {isLoading ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="size-4" />
-                  )}
-                  重新读取
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 w-full justify-center rounded-full border-stone-200 bg-white px-3 text-[13px] text-stone-700 shadow-none sm:w-auto"
-                  onClick={restoreDefaults}
-                  disabled={isLoading || isSaving}
-                >
-                  <RefreshCcw className="size-4" />
-                  恢复默认
-                </Button>
-                <Button
-                  type="button"
-                  className="h-10 w-full justify-center rounded-full bg-stone-950 px-3 text-[13px] text-white hover:bg-stone-800 sm:w-auto"
-                  onClick={() => void saveConfig()}
-                  disabled={!isDirty || isLoading || isSaving}
-                >
-                  {isSaving ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <Save className="size-4" />
-                  )}
-                  保存配置
-                </Button>
+              <div className="space-y-1">
+                <h1 className="text-2xl font-semibold tracking-tight text-stone-950">
+                  配置管理
+                </h1>
               </div>
             </div>
-            {storageMigrationNotice ? (
-              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                {storageMigrationNotice}
-              </div>
-            ) : null}
-          </div>
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full justify-center rounded-full border-stone-200 bg-white px-3 text-[13px] text-stone-700 shadow-none sm:w-auto"
+                onClick={() => {
+                  window.location.href = "/startup-check";
+                }}
+                disabled={isLoading || isSaving}
+              >
+                <Stethoscope className="size-4" />
+                启动体检
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full justify-center rounded-full border-stone-200 bg-white px-3 text-[13px] text-stone-700 shadow-none sm:w-auto"
+                onClick={() => void loadConfig()}
+                disabled={isLoading || isSaving}
+              >
+                {isLoading ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                重新读取
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full justify-center rounded-full border-stone-200 bg-white px-3 text-[13px] text-stone-700 shadow-none sm:w-auto"
+                onClick={restoreDefaults}
+                disabled={isLoading || isSaving}
+              >
+                <RefreshCcw className="size-4" />
+                恢复默认
+              </Button>
+              <Button
+                type="button"
+                className="h-10 w-full justify-center rounded-full bg-stone-950 px-3 text-[13px] text-white hover:bg-stone-800 sm:w-auto"
+                onClick={() => void saveConfig()}
+                disabled={!isDirty || isLoading || isSaving}
+              >
+                {isSaving ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Save className="size-4" />
+                )}
+                保存配置
+              </Button>
+            </div>
+          </section>
         </div>
 
-        <ImageModeSection
-          config={config}
-          isStudioMode={isStudioMode}
-          isCPAMode={isCPAMode}
-          effectiveCPAImageBaseUrl={effectiveCPAImageBaseUrl}
-          syncManagementKeyStatus={syncManagementKeyStatus}
-          setSection={setSection}
-        />
+        {storageMigrationNotice ? (
+          <div className="mt-1 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            {storageMigrationNotice}
+          </div>
+        ) : null}
 
-        <IntegrationSection config={config} setSection={setSection} />
+        <div className="mt-5 space-y-5">
+          <ImageModeSection
+            config={config}
+            isStudioMode={isStudioMode}
+            isCPAMode={isCPAMode}
+            effectiveCPAImageBaseUrl={effectiveCPAImageBaseUrl}
+            syncManagementKeyStatus={syncManagementKeyStatus}
+            setSection={setSection}
+          />
 
-        <RuntimeSection config={config} setSection={setSection} />
+          <IntegrationSection config={config} setSection={setSection} />
 
-        <ServicePathsSection
-          config={config}
-          setConfig={setConfig}
-          resolvedStaticDir={resolvedStaticDir}
-          startupErrorPath={startupErrorPath}
-        />
+          <RuntimeSection config={config} setSection={setSection} />
+
+          <ServicePathsSection
+            config={config}
+            setConfig={setConfig}
+            resolvedStaticDir={resolvedStaticDir}
+            startupErrorPath={startupErrorPath}
+          />
+        </div>
       </div>
     </section>
   );

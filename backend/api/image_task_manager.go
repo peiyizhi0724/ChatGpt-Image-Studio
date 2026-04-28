@@ -803,8 +803,9 @@ func (m *imageTaskManager) newTask(req createImageTaskRequest) (*imageTask, erro
 		}
 	}
 
+	resolutionAccess := strings.ToLower(strings.TrimSpace(req.ResolutionAccess))
 	requirePaid := m.server.configuredImageMode() == "studio" &&
-		requiresPaidGenerateTask(req.Size)
+		(resolutionAccess == "paid" || requiresPaidGenerateTask(req.Size))
 	requirement := imageTaskRequirement{
 		NeedPaid:        requirePaid,
 		SourceAccountID: "",

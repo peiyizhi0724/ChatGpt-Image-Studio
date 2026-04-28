@@ -163,7 +163,7 @@ docker compose up -d
 如需固定到某个版本，可先设置：
 
 ```bash
-export IMAGE_TAG=v1.2.9
+export IMAGE_TAG=v1.2.10
 docker compose pull
 docker compose up -d
 ```
@@ -171,7 +171,7 @@ docker compose up -d
 Windows PowerShell：
 
 ```powershell
-$env:IMAGE_TAG = "v1.2.9"
+$env:IMAGE_TAG = "v1.2.10"
 docker compose pull
 docker compose up -d
 ```

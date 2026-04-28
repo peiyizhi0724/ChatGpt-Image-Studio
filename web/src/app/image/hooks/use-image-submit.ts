@@ -7,6 +7,7 @@ import {
   createImageTask,
   type ImageModel,
   type ImageQuality,
+  type ImageResolutionAccess,
 } from "@/lib/api";
 import type {
   ImageConversation,
@@ -33,6 +34,7 @@ type UseImageSubmitOptions = {
   sourceImages: StoredSourceImage[];
   parsedCount: number;
   imageSize: string;
+  imageResolutionAccess: ImageResolutionAccess;
   imageQuality: ImageQuality;
   selectedConversationId: string | null;
   editorTarget: EditorTarget | null;
@@ -62,6 +64,7 @@ function buildConversationBase(
     model: draftTurn.model,
     count: draftTurn.count,
     size: draftTurn.size,
+    resolutionAccess: draftTurn.resolutionAccess,
     quality: draftTurn.quality,
     scale: draftTurn.scale,
     sourceImages: draftTurn.sourceImages,
@@ -95,6 +98,14 @@ function buildSourceReference(payload: {
   };
 }
 
+function normalizeImageQuality(value: string | undefined, fallback: ImageQuality) {
+  const trimmed = String(value || "").trim();
+  if (trimmed === "low" || trimmed === "medium" || trimmed === "high") {
+    return trimmed;
+  }
+  return fallback;
+}
+
 export function useImageSubmit({
   mode,
   imagePrompt,
@@ -104,6 +115,7 @@ export function useImageSubmit({
   sourceImages,
   parsedCount,
   imageSize,
+  imageResolutionAccess,
   imageQuality,
   selectedConversationId,
   editorTarget,
@@ -125,12 +137,18 @@ export function useImageSubmit({
     async ({
       prompt,
       mask,
+      aspectRatio: _aspectRatio,
+      resolutionTier: _resolutionTier,
+      quality: overrideQuality,
     }: {
       prompt: string;
       mask: {
         file: File;
         previewDataUrl: string;
       };
+      aspectRatio?: string;
+      resolutionTier?: string;
+      quality?: string;
     }) => {
       if (isSelectionEditDispatchingRef.current || !editorTarget) {
         return;
@@ -143,7 +161,10 @@ export function useImageSubmit({
       const targetConversationId =
         editorTarget.conversationId ?? selectedConversationId;
       const conversationId = targetConversationId ?? makeId();
-      const supportsEditableOutputOptions = editorTarget.image === null;
+      const supportsEditableOutputOptions = true;
+      const nextQuality = supportsEditableOutputOptions
+        ? normalizeImageQuality(overrideQuality, imageQuality)
+        : imageQuality;
       const turnId = makeId();
       const now = new Date().toISOString();
       const draftTurn = createConversationTurn({
@@ -154,7 +175,10 @@ export function useImageSubmit({
         model: imageModel,
         count: 1,
         size: supportsEditableOutputOptions ? imageSize : undefined,
-        quality: supportsEditableOutputOptions ? imageQuality : undefined,
+        resolutionAccess: supportsEditableOutputOptions
+          ? imageResolutionAccess
+          : undefined,
+        quality: supportsEditableOutputOptions ? nextQuality : undefined,
         sourceImages: [
           buildSourceReference({
             id: makeId(),
@@ -206,7 +230,10 @@ export function useImageSubmit({
           model: imageModel,
           count: 1,
           size: supportsEditableOutputOptions ? imageSize : undefined,
-          quality: supportsEditableOutputOptions ? imageQuality : undefined,
+          resolutionAccess: supportsEditableOutputOptions
+            ? imageResolutionAccess
+            : undefined,
+          quality: supportsEditableOutputOptions ? nextQuality : undefined,
           sourceImages: draftTurn.sourceImages,
           sourceReference,
         });
@@ -257,6 +284,7 @@ export function useImageSubmit({
       focusConversation,
       imageModel,
       imageQuality,
+      imageResolutionAccess,
       imageSize,
       makeId,
       persistConversation,
@@ -325,11 +353,8 @@ export function useImageSubmit({
         model: turn.model,
         count: displayCount,
         size: turn.size,
-        quality:
-          turnMode === "edit" ||
-          (turnMode === "generate" && turnImageSources.length === 0)
-            ? turnQuality
-            : undefined,
+        resolutionAccess: turn.resolutionAccess,
+        quality: turnQuality,
         sourceImages: turnSourceImages,
         sourceReference: turn.sourceReference,
         images: nextImages,
@@ -359,6 +384,7 @@ export function useImageSubmit({
           count: requestCount,
           retryImageIndex: isSingleImageRetry ? imageIndex : undefined,
           size: turn.size,
+          resolutionAccess: turn.resolutionAccess,
           quality: turnQuality,
           sourceImages: turnSourceImages,
           sourceReference: turn.sourceReference,
@@ -449,8 +475,8 @@ export function useImageSubmit({
 
     const conversationId = selectedConversationId ?? makeId();
     const turnId = makeId();
-    const expectedCount =
-      mode === "generate" && imageSources.length === 0 ? parsedCount : 1;
+      const expectedCount =
+      mode === "generate" ? parsedCount : 1;
     const draftTurn = createConversationTurn({
       turnId,
       title: buildConversationTitle(mode, prompt),
@@ -459,10 +485,8 @@ export function useImageSubmit({
       model: imageModel,
       count: expectedCount,
       size: imageSize,
-      quality:
-        mode === "edit" || (mode === "generate" && imageSources.length === 0)
-          ? imageQuality
-          : undefined,
+      resolutionAccess: imageResolutionAccess,
+      quality: imageQuality,
       sourceImages,
       images: createLoadingImages(expectedCount, turnId),
       createdAt: new Date().toISOString(),
@@ -494,6 +518,7 @@ export function useImageSubmit({
         model: imageModel,
         count: expectedCount,
         size: imageSize,
+        resolutionAccess: imageResolutionAccess,
         quality: imageQuality,
         sourceImages,
       });
@@ -546,6 +571,7 @@ export function useImageSubmit({
     makeId,
     mode,
     imageSize,
+    imageResolutionAccess,
     imageQuality,
     parsedCount,
     persistConversation,

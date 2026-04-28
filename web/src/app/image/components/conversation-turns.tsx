@@ -343,9 +343,9 @@ export const ConversationTurns = memo(function ConversationTurns({
                         className={cn(
                           "overflow-hidden rounded-[22px] border border-stone-200 bg-white shadow-sm",
                           image.status === "success" &&
-                            "w-fit max-w-full justify-self-start",
+                            "w-fit max-w-[75%] justify-self-start",
                           image.status !== "success" &&
-                            "w-full max-w-[360px] justify-self-start",
+                            "w-full max-w-[270px] justify-self-start",
                         )}
                       >
                         {image.status === "success" && imageDataUrl ? (
@@ -357,7 +357,7 @@ export const ConversationTurns = memo(function ConversationTurns({
                                 width={1024}
                                 height={1024}
                                 unoptimized
-                                className="block h-auto max-h-[360px] w-auto max-w-full cursor-zoom-in"
+                                className="block h-auto max-h-[270px] w-auto max-w-full cursor-zoom-in"
                               />
                             </Zoom>
                             <div className="flex flex-wrap items-center gap-2 border-t border-stone-100 px-4 py-3">

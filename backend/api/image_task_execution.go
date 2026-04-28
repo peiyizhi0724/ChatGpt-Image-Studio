@@ -83,6 +83,8 @@ func (s *Server) executeImageTaskUnit(ctx context.Context, taskID string, unitIn
 					task.SourceReference.ConversationID,
 					task.SourceReference.ParentMessageID,
 					mask,
+					task.Size,
+					task.Quality,
 				)
 			},
 			fakeReq,

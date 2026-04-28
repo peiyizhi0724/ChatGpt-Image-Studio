@@ -47,8 +47,8 @@ import { useImageSourceInputs } from "./hooks/use-image-source-inputs";
 import { useImageSubmit } from "./hooks/use-image-submit";
 import { buildConversationPreviewSource } from "./view-utils";
 
-type ImageAspectRatio = "1:1" | "4:3" | "3:2" | "16:9" | "21:9" | "9:16";
-type ImageResolutionTier = "sd" | "2k" | "4k";
+type ImageAspectRatio = "auto" | "1:1" | "4:3" | "3:2" | "16:9" | "21:9" | "9:16";
+type ImageResolutionTier = "auto-free" | "auto-paid" | "sd" | "2k" | "4k";
 type ImageResolutionAccess = "free" | "paid";
 type ImageResolutionPreset = {
   tier: ImageResolutionTier;
@@ -61,6 +61,7 @@ const imageAspectRatioOptions: Array<{
   label: string;
   value: ImageAspectRatio;
 }> = [
+  { label: "Auto", value: "auto" },
   { label: "1:1", value: "1:1" },
   { label: "4:3", value: "4:3" },
   { label: "3:2", value: "3:2" },
@@ -69,8 +70,13 @@ const imageAspectRatioOptions: Array<{
   { label: "9:16", value: "9:16" },
 ];
 
+const imageAutoResolutionPresets: ImageResolutionPreset[] = [
+  { tier: "auto-free", label: "Free（提示词指定）", value: "", access: "free" },
+  { tier: "auto-paid", label: "Paid（提示词指定）", value: "", access: "paid" },
+];
+
 const imageResolutionPresets: Record<
-  ImageAspectRatio,
+  Exclude<ImageAspectRatio, "auto">,
   ImageResolutionPreset[]
 > = {
   "1:1": [
@@ -749,7 +755,10 @@ export default function ImagePage() {
     ],
   );
   const currentResolutionPresets = useMemo(
-    () => imageResolutionPresets[imageAspectRatio],
+    () =>
+      imageAspectRatio === "auto"
+        ? imageAutoResolutionPresets
+        : imageResolutionPresets[imageAspectRatio],
     [imageAspectRatio],
   );
   const selectedResolutionPreset = useMemo(
@@ -779,11 +788,14 @@ export default function ImagePage() {
   const imageResolutionTierOptions = useMemo(
     () =>
       currentResolutionPresets.map((item) => ({
-        label: `${item.access === "paid" ? "Paid" : "Free"} ${formatResolutionLabel(item.value)}${item.access === "paid" ? `（${item.label.replace("Paid ", "")}）` : ""}`,
+        label:
+          imageAspectRatio === "auto"
+            ? item.label
+            : `${item.access === "paid" ? "Paid" : "Free"} ${formatResolutionLabel(item.value)}${item.access === "paid" ? `（${item.label.replace("Paid ", "")}）` : ""}`,
         value: item.tier,
         disabled: item.access === "paid" && !hasAvailablePaidAccount,
       })),
-    [currentResolutionPresets, hasAvailablePaidAccount],
+    [currentResolutionPresets, hasAvailablePaidAccount, imageAspectRatio],
   );
   const imageResolutionTierLabel = useMemo(
     () =>
@@ -796,6 +808,9 @@ export default function ImagePage() {
   );
   const imageSize = useMemo(
     () =>
+      imageAspectRatio === "auto"
+        ? ""
+        :
       currentResolutionPresets.find(
         (item) =>
           item.tier === imageResolutionTier &&
@@ -805,7 +820,16 @@ export default function ImagePage() {
         (item) => hasAvailablePaidAccount || item.access === "free",
       )?.value ??
       currentResolutionPresets[0].value,
-    [currentResolutionPresets, hasAvailablePaidAccount, imageResolutionTier],
+    [
+      currentResolutionPresets,
+      hasAvailablePaidAccount,
+      imageAspectRatio,
+      imageResolutionTier,
+    ],
+  );
+  const imageResolutionAccess = useMemo<ImageResolutionAccess>(
+    () => selectedResolutionPreset?.access ?? "free",
+    [selectedResolutionPreset],
   );
   const imageSizeHint = useMemo(
     () =>
@@ -832,6 +856,10 @@ export default function ImagePage() {
             <span className="font-semibold text-stone-800">账号要求：</span>
             2K 及以上像素档仅 Paid 账号可用，包括 Team / Plus / Pro。
           </div>
+          <div className="mt-2">
+            <span className="font-semibold text-stone-800">Auto 模式补充：</span>
+            当比例切到 Auto 时，当前项目不会强制指定比例和分辨率，请直接在提示词里写明横竖版、画幅比例和目标输出尺寸。`Free / Paid` 只决定调度时优先使用哪类图片账号，不会把固定尺寸写进上游请求。
+          </div>
         </>
       ),
     [mode],
@@ -843,10 +871,6 @@ export default function ImagePage() {
   const maskSource = useMemo(
     () => sourceImages.find((item) => item.role === "mask") ?? null,
     [sourceImages],
-  );
-  const hasGenerateReferences = useMemo(
-    () => mode === "generate" && imageSources.length > 0,
-    [imageSources, mode],
   );
   const processingStatus = useMemo(
     () =>
@@ -1373,6 +1397,7 @@ export default function ImagePage() {
       sourceImages,
       parsedCount,
       imageSize,
+      imageResolutionAccess,
       imageQuality,
       selectedConversationId,
       editorTarget,
@@ -1483,8 +1508,8 @@ export default function ImagePage() {
           className={cn(
             "hide-scrollbar min-h-[240px] overflow-visible lg:h-full lg:min-h-0 lg:overflow-y-auto lg:pb-0",
             isMobileComposerCollapsed
-              ? "pb-[88px] sm:pb-[96px]"
-              : "pb-[320px] sm:pb-[340px]",
+              ? "pb-[68px] sm:pb-[74px]"
+              : "pb-[228px] sm:pb-[244px]",
           )}
         >
           {!selectedConversation ? (
@@ -1519,8 +1544,8 @@ export default function ImagePage() {
             className={cn(
               "absolute right-4 z-10 inline-flex size-11 items-center justify-center rounded-full border border-stone-200 bg-white/95 text-stone-700 shadow-lg shadow-stone-300/30 backdrop-blur transition hover:bg-white hover:text-stone-950 dark:border-[var(--studio-border)] dark:bg-[color:var(--studio-panel-soft)] dark:text-[var(--studio-text)] dark:shadow-black/40 dark:hover:bg-[var(--studio-panel-muted)] dark:hover:text-[var(--studio-text-strong)] sm:right-5 lg:bottom-5",
               isMobileComposerCollapsed
-                ? "bottom-[72px] sm:bottom-[80px]"
-                : "bottom-[228px] sm:bottom-[244px]",
+                ? "bottom-[52px] sm:bottom-[60px]"
+                : "bottom-[150px] sm:bottom-[164px]",
             )}
             aria-label="滚动到底部"
             title="滚动到底部"
@@ -1544,7 +1569,6 @@ export default function ImagePage() {
         imageQualityOptions={imageQualityOptions}
         imageQualityDisabled={!isImageQualityEnabled}
         imageQualityDisabledReason={imageQualityDisabledReason}
-        hasGenerateReferences={hasGenerateReferences}
         availableQuota={availableQuota}
         sourceImages={sourceImages}
         imagePrompt={imagePrompt}
@@ -1597,8 +1621,26 @@ export default function ImagePage() {
         imageName={editorTarget?.imageName || "image.png"}
         imageSrc={editorTarget?.sourceDataUrl || ""}
         isSubmitting={false}
+        allowOutputOptions={Boolean(editorTarget)}
+        imageAspectRatio={imageAspectRatio}
+        imageAspectRatioOptions={imageAspectRatioOptions}
+        imageResolutionTier={imageResolutionTier}
+        imageResolutionTierOptions={imageResolutionTierOptions}
+        imageQuality={imageQuality}
+        imageQualityOptions={imageQualityOptions}
+        imageQualityDisabled={!isImageQualityEnabled}
+        imageQualityDisabledReason={imageQualityDisabledReason}
+        onImageAspectRatioChange={(value) =>
+          setImageAspectRatio(value as ImageAspectRatio)
+        }
+        onImageResolutionTierChange={(value) =>
+          setImageResolutionTier(value as ImageResolutionTier)
+        }
+        onImageQualityChange={(value) => setImageQuality(value as ImageQuality)}
         onClose={closeSelectionEditor}
-        onSubmit={handleSelectionEditSubmit}
+        onSubmit={async (payload) => {
+          await handleSelectionEditSubmit(payload);
+        }}
       />
     </section>
   );

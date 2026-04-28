@@ -211,6 +211,156 @@ func TestCreateImageEditTaskHighResolutionUsesPaidAccount(t *testing.T) {
 	}
 }
 
+func TestCreateImageGenerateTaskAutoFreeUsesFreeAccount(t *testing.T) {
+	server, recorder := newImageModeCompatTestServerWithOptions(t, imageModeCompatScenario{
+		imageMode:   "studio",
+		accountType: "Free",
+		freeRoute:   "legacy",
+		freeModel:   "auto",
+		paidRoute:   "responses",
+		paidModel:   "gpt-5.4-mini",
+	}, compatTestServerOptions{
+		accounts: []compatSeedAccount{
+			{
+				fileName:    "free-auto.json",
+				accessToken: "token-free-auto",
+				accountType: "Free",
+				priority:    100,
+				quota:       5,
+				status:      "正常",
+			},
+			{
+				fileName:    "paid-auto.json",
+				accessToken: "token-paid-auto",
+				accountType: "Plus",
+				priority:    10,
+				quota:       5,
+				status:      "正常",
+			},
+		},
+	})
+
+	if _, err := server.imageTasks.createTask(createImageTaskRequest{
+		ConversationID:   "conv-generate-auto-free-1",
+		TurnID:           "turn-generate-auto-free-1",
+		Mode:             "generate",
+		Prompt:           "auto free generate",
+		Model:            "gpt-image-2",
+		Count:            1,
+		Size:             "",
+		ResolutionAccess: "free",
+		Quality:          "high",
+	}); err != nil {
+		t.Fatalf("createTask() returned error: %v", err)
+	}
+
+	waitForTaskStatus(t, server, "turn-generate-auto-free-1", imageTaskStatusSucceeded)
+	if len(recorder.callSequence) == 0 {
+		t.Fatal("callSequence = empty, want free auto execution")
+	}
+	lastCall := recorder.callSequence[len(recorder.callSequence)-1]
+	if !strings.Contains(lastCall, "token-free-auto") {
+		t.Fatalf("callSequence = %#v, want free account selected for auto-free generate", recorder.callSequence)
+	}
+}
+
+func TestCreateImageGenerateTaskAutoPaidUsesPaidAccount(t *testing.T) {
+	server, recorder := newImageModeCompatTestServerWithOptions(t, imageModeCompatScenario{
+		imageMode:   "studio",
+		accountType: "Free",
+		freeRoute:   "legacy",
+		freeModel:   "auto",
+		paidRoute:   "responses",
+		paidModel:   "gpt-5.4-mini",
+	}, compatTestServerOptions{
+		accounts: []compatSeedAccount{
+			{
+				fileName:    "free-priority-auto-paid.json",
+				accessToken: "token-free-priority-auto-paid",
+				accountType: "Free",
+				priority:    100,
+				quota:       5,
+				status:      "正常",
+			},
+			{
+				fileName:    "paid-priority-auto-paid.json",
+				accessToken: "token-paid-priority-auto-paid",
+				accountType: "Plus",
+				priority:    10,
+				quota:       5,
+				status:      "正常",
+			},
+		},
+	})
+
+	if _, err := server.imageTasks.createTask(createImageTaskRequest{
+		ConversationID:   "conv-generate-auto-paid-1",
+		TurnID:           "turn-generate-auto-paid-1",
+		Mode:             "generate",
+		Prompt:           "auto paid generate",
+		Model:            "gpt-image-2",
+		Count:            1,
+		Size:             "",
+		ResolutionAccess: "paid",
+		Quality:          "high",
+	}); err != nil {
+		t.Fatalf("createTask() returned error: %v", err)
+	}
+
+	waitForTaskStatus(t, server, "turn-generate-auto-paid-1", imageTaskStatusSucceeded)
+	if len(recorder.callSequence) == 0 {
+		t.Fatal("callSequence = empty, want paid auto execution")
+	}
+	lastCall := recorder.callSequence[len(recorder.callSequence)-1]
+	if !strings.Contains(lastCall, "token-paid-priority-auto-paid") {
+		t.Fatalf("callSequence = %#v, want paid account selected for auto-paid generate", recorder.callSequence)
+	}
+}
+
+func TestCreateImageGenerateTaskAutoPaidRequiresPaidAccount(t *testing.T) {
+	server, _ := newImageModeCompatTestServerWithOptions(t, imageModeCompatScenario{
+		imageMode:   "studio",
+		accountType: "Free",
+		freeRoute:   "legacy",
+		freeModel:   "auto",
+		paidRoute:   "responses",
+		paidModel:   "gpt-5.4-mini",
+	}, compatTestServerOptions{
+		accounts: []compatSeedAccount{
+			{
+				fileName:    "free-only-auto-paid.json",
+				accessToken: "token-free-only-auto-paid",
+				accountType: "Free",
+				priority:    100,
+				quota:       5,
+				status:      "正常",
+			},
+		},
+	})
+
+	_, err := server.imageTasks.createTask(createImageTaskRequest{
+		ConversationID:   "conv-generate-auto-paid-no-paid",
+		TurnID:           "turn-generate-auto-paid-no-paid",
+		Mode:             "generate",
+		Prompt:           "auto paid without paid account",
+		Model:            "gpt-image-2",
+		Count:            1,
+		Size:             "",
+		ResolutionAccess: "paid",
+		Quality:          "high",
+	})
+	if err == nil {
+		t.Fatal("createTask() returned nil error, want paid account validation failure")
+	}
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("createTask() error = %T, want *requestError", err)
+	}
+	if reqErr.code != "paid_resolution_requires_paid_account" {
+		t.Fatalf("request error code = %q, want paid_resolution_requires_paid_account", reqErr.code)
+	}
+}
+
 func waitForTaskStatus(t *testing.T, server *Server, taskID string, want imageTaskStatus) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)

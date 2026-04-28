@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type ReactNode, type RefObject } from "react";
 import Zoom from "react-medium-image-zoom";
-import { ArrowUp, Brush, ChevronDown, CircleHelp, ImagePlus, Trash2, Upload } from "lucide-react";
+import { ArrowUp, Brush, ChevronDown, CircleHelp, ImagePlus, Trash2 } from "lucide-react";
 
 import { AppImage as Image } from "@/components/app-image";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,6 @@ type PromptComposerProps = {
   imageQualityOptions: Array<{ label: string; value: ImageQuality; description: string }>;
   imageQualityDisabled: boolean;
   imageQualityDisabledReason: string;
-  hasGenerateReferences: boolean;
   availableQuota: string;
   sourceImages: StoredSourceImage[];
   imagePrompt: string;
@@ -69,7 +68,6 @@ export function PromptComposer({
   imageQualityOptions,
   imageQualityDisabled,
   imageQualityDisabledReason,
-  hasGenerateReferences,
   availableQuota,
   sourceImages,
   imagePrompt,
@@ -90,7 +88,7 @@ export function PromptComposer({
   onSubmit,
 }: PromptComposerProps) {
   const imageQualityLabel = imageQualityOptions.find((item) => item.value === imageQuality)?.label ?? imageQuality;
-  const showImageOutputControls = mode === "edit" || (mode === "generate" && !hasGenerateReferences);
+  const showImageOutputControls = mode === "edit" || mode === "generate";
   const sizeHintAriaLabel = mode === "edit" ? "查看编辑输出说明" : "查看分辨率说明";
   const imageQualityPrefix = mode === "edit" ? "输出质量" : "质量";
   const hasComposerContent = imagePrompt.trim().length > 0 || sourceImages.length > 0;
@@ -136,14 +134,14 @@ export function PromptComposer({
         isMobileComposerCollapsed
           ? "border-transparent bg-white/96 shadow-none dark:bg-[color:var(--studio-bg)]"
           : "rounded-[26px] border border-stone-200 bg-white/96 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.35)] dark:border-[var(--studio-border)] dark:bg-[color:var(--studio-bg)] dark:shadow-[0_24px_70px_-30px_rgba(0,0,0,0.82)]",
-        isMobileComposerCollapsed ? "py-1.5 sm:py-2" : "py-2 sm:py-3",
-        "lg:border-stone-200 lg:bg-white lg:py-4 lg:shadow-none",
+        isMobileComposerCollapsed ? "py-1 sm:py-1.5" : "py-1 sm:py-1.5",
+        "lg:border-stone-200 lg:bg-white lg:py-2 lg:shadow-none",
       )}
     >
-      <div className="mx-auto flex max-w-[1120px] flex-col gap-3">
+      <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-2.5 px-4 sm:px-6">
         <div
           className={cn(
-            "flex-col gap-2 xl:flex-row xl:items-center xl:justify-between",
+            "flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between",
             showMobileExpandedSections ? "flex" : "hidden lg:flex",
           )}
         >
@@ -246,7 +244,7 @@ export function PromptComposer({
               </Select>
             ) : null}
 
-            {mode === "generate" && !hasGenerateReferences ? (
+            {mode === "generate" ? (
               <div className="flex shrink-0 items-center gap-1 rounded-full border border-stone-200 bg-white px-2 py-0.5 sm:gap-1.5 sm:px-2.5 sm:py-1">
                 <span className="text-[13px] font-medium text-stone-700 sm:text-sm">张数</span>
                 <Input
@@ -330,35 +328,71 @@ export function PromptComposer({
             </div>
           ) : null}
 
-          <div className="relative px-3 pb-1.5 pt-2.5 sm:px-4 sm:pb-2 sm:pt-3">
-            <Textarea
-              ref={textareaRef}
-              value={imagePrompt}
-              onChange={(event) => onPromptChange(event.target.value)}
-              placeholder={
-                mode === "generate"
-                  ? "描述你想生成的画面，也可以先上传参考图"
-                  : mode === "edit"
-                    ? "描述你想如何修改当前图片"
-                    : "可选：描述你想增强的方向"
-              }
-              onPaste={onPromptPaste}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void onSubmit();
+          <div className="relative px-3 pb-1.5 pt-2 sm:px-4 sm:pb-2 sm:pt-2.5">
+            {isMobileComposerCollapsed ? (
+              <>
+                <button
+                  type="button"
+                  className="flex min-h-[22px] w-full items-center px-1 py-0 text-left text-[14px] leading-5 text-stone-400 sm:hidden"
+                  onClick={() => {
+                    setIsMobileComposerExpanded(true);
+                    textareaRef.current?.focus();
+                  }}
+                >
+                  <span className="block w-full truncate">
+                    {imagePrompt.trim() ||
+                      (mode === "generate"
+                        ? "描述你想生成的画面，也可以先上传参考图"
+                        : "描述你想如何修改当前图片")}
+                  </span>
+                </button>
+                <Textarea
+                  ref={textareaRef}
+                  value={imagePrompt}
+                  onChange={(event) => onPromptChange(event.target.value)}
+                  placeholder={
+                    mode === "generate"
+                      ? "描述你想生成的画面，也可以先上传参考图"
+                      : mode === "edit"
+                        ? "描述你想如何修改当前图片"
+                        : "可选：描述你想增强的方向"
+                  }
+                  onPaste={onPromptPaste}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void onSubmit();
+                    }
+                  }}
+                  className="hidden resize-none border-0 bg-transparent !px-1 !pb-1 text-[14px] text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 sm:block sm:min-h-[38px] sm:max-h-[70px] sm:overflow-y-auto sm:!pt-1 sm:pr-10 sm:text-[15px] sm:leading-7"
+                  onFocus={() => setIsMobileComposerExpanded(true)}
+                />
+              </>
+            ) : (
+              <Textarea
+                ref={textareaRef}
+                value={imagePrompt}
+                onChange={(event) => onPromptChange(event.target.value)}
+                placeholder={
+                  mode === "generate"
+                    ? "描述你想生成的画面，也可以先上传参考图"
+                    : mode === "edit"
+                      ? "描述你想如何修改当前图片"
+                      : "可选：描述你想增强的方向"
                 }
-              }}
-              className={cn(
-                "resize-none border-0 bg-transparent !px-1 !pb-1 text-[14px] text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 sm:min-h-[92px] sm:max-h-[480px] sm:text-[15px] sm:leading-7",
-                isMobileComposerCollapsed
-                  ? "min-h-[24px] max-h-[24px] overflow-hidden !pt-0.5 !pb-0.5 pr-9 leading-6"
-                  : "min-h-[72px] max-h-[180px] overflow-y-auto !pt-1 pr-10 leading-6",
-              )}
-              onFocus={() => setIsMobileComposerExpanded(true)}
-            />
+                onPaste={onPromptPaste}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void onSubmit();
+                  }
+                }}
+                className="resize-none border-0 bg-transparent !px-1 !pb-1 text-[14px] text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 min-h-[30px] max-h-[70px] overflow-y-auto !pt-1 pr-10 leading-6 sm:min-h-[38px] sm:text-[15px] sm:leading-7"
+                onFocus={() => setIsMobileComposerExpanded(true)}
+              />
+            )}
           </div>
-          <div className={cn("px-3 pb-2 pt-1.5 sm:px-4 sm:pb-4 sm:pt-2", showMobileExpandedSections ? "block" : "hidden lg:block")}>
+          <div className={cn("px-3 pb-1.5 pt-2.5 sm:px-4 sm:pb-2.5 sm:pt-2.5", showMobileExpandedSections ? "block" : "hidden lg:block")}>
             <div className="flex items-end justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 <Button
@@ -375,21 +409,6 @@ export function PromptComposer({
                   {mode === "generate" ? "上传参考图" : "上传源图"}
                 </Button>
 
-                {mode === "edit" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 rounded-full border-stone-200 bg-white px-2 text-[11px] font-medium text-stone-700 shadow-none sm:h-8 sm:px-2.5 sm:text-xs"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      maskInputRef.current?.click();
-                    }}
-                  >
-                    <Upload className="size-3.5" />
-                    遮罩
-                  </Button>
-                ) : null}
               </div>
 
               <button
@@ -411,16 +430,6 @@ export function PromptComposer({
             className="hidden"
             onChange={(event) => {
               void onAppendFiles(event.target.files, "image");
-              event.currentTarget.value = "";
-            }}
-          />
-          <input
-            ref={maskInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(event) => {
-              void onAppendFiles(event.target.files, "mask");
               event.currentTarget.value = "";
             }}
           />

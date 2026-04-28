@@ -41,6 +41,8 @@ type ImageWorkflowClient interface {
 		conversationID string,
 		parentMessageID string,
 		mask []byte,
+		size string,
+		quality string,
 	) ([]ImageResult, error)
 }
 
@@ -110,7 +112,11 @@ func (c *ResponsesClient) InpaintImageByMask(
 	conversationID string,
 	parentMessageID string,
 	mask []byte,
+	size string,
+	quality string,
 ) ([]ImageResult, error) {
+	_ = size
+	_ = quality
 	return nil, fmt.Errorf("selection edit requires conversation context")
 }
 

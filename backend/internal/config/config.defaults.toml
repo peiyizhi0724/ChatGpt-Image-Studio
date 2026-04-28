@@ -2,7 +2,7 @@
 
 [app]
 name = "chatgpt2api-studio"
-version = "1.2.9"
+version = "1.2.10"
 api_key = ""
 auth_key = "chatgpt2api"
 image_format = "url"

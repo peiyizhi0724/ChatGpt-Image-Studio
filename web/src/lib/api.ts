@@ -18,6 +18,7 @@ export type SyncSource = "cpa" | "newapi" | "sub2api";
 export type AccountSourceKind = "auth_file" | "token";
 export type ImageModel = "gpt-image-1" | "gpt-image-2";
 export type ImageQuality = "low" | "medium" | "high";
+export type ImageResolutionAccess = "free" | "paid";
 export type ImageResponseItem = {
   url?: string;
   b64_json?: string;
@@ -847,6 +848,7 @@ export async function createImageTask(payload: {
   count?: number;
   retryImageIndex?: number;
   size?: string;
+  resolutionAccess?: ImageResolutionAccess;
   quality?: ImageQuality;
   sourceImages?: Array<{
     id: string;
@@ -874,6 +876,7 @@ export async function createImageTask(payload: {
           ? payload.retryImageIndex
           : undefined,
       size: payload.size?.trim() || undefined,
+      resolutionAccess: payload.resolutionAccess,
       quality: payload.quality,
       sourceImages: payload.sourceImages ?? [],
       sourceReference: payload.sourceReference,

@@ -57,6 +57,7 @@ type createImageTaskRequest struct {
 	Model           string                              `json:"model"`
 	Count           int                                 `json:"count"`
 	Size            string                              `json:"size,omitempty"`
+	ResolutionAccess string                             `json:"resolutionAccess,omitempty"`
 	Quality         string                              `json:"quality,omitempty"`
 	Background      string                              `json:"background,omitempty"`
 	ResponseFormat  string                              `json:"responseFormat,omitempty"`
