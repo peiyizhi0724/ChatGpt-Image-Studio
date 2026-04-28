@@ -118,6 +118,21 @@
 - `store-selected = false` 可以避免 mihomo 把已经失效的旧节点长期缓存成“当前选择”
 - 候选池从 `3` 提到 `8` 后，单个节点挂掉时更容易自动切走
 
+## 应用内自动重试
+
+当前项目已经支持：
+
+- 官方图片链路在遇到 `EOF`、`i/o timeout`、连接失败等网络错误时自动重试
+- 如果配置了 Mihomo 控制口地址，会在重试前先调用 `Proxy/delay`
+- 自动重试不会把 `401 / 403` 这种上游明确拒绝误判成网络故障
+
+默认约定：
+
+- 配置项位于 `[proxy]`
+- `auto_retry_enabled = true`
+- `controller_group = "Proxy"`
+- 如果 `controller_url` 为空，程序会尝试从 `proxy.url` 自动推断同主机的 `:9090` 控制口
+
 ## 当前脚本里的关键规则
 
 `/usr/local/sbin/update-mihomo-subscription.py` 目前需要保持这些关键行为：

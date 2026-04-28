@@ -89,6 +89,10 @@ enabled = false
 url = "socks5h://127.0.0.1:10808"
 mode = "fixed"
 sync_enabled = false
+auto_retry_enabled = true
+controller_url = ""
+controller_secret = ""
+controller_group = "Proxy"
 
 # CPA 图片接口配置。
 # 当 image_mode = "cpa" 时会使用这里的 base_url / api_key。

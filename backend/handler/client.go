@@ -31,10 +31,13 @@ const (
 )
 
 type ImageRequestConfig struct {
-	RequestTimeout time.Duration
-	SSETimeout     time.Duration
-	PollInterval   time.Duration
-	PollMaxWait    time.Duration
+	RequestTimeout      time.Duration
+	SSETimeout          time.Duration
+	PollInterval        time.Duration
+	PollMaxWait         time.Duration
+	NetworkRetryHook    NetworkRetryHook
+	NetworkRetryCount   int
+	NetworkRetryBackoff time.Duration
 }
 
 func normalizeImageRequestConfig(cfg ImageRequestConfig) ImageRequestConfig {
@@ -53,6 +56,12 @@ func normalizeImageRequestConfig(cfg ImageRequestConfig) ImageRequestConfig {
 	if cfg.PollMaxWait < cfg.SSETimeout {
 		cfg.PollMaxWait = cfg.SSETimeout
 	}
+	if cfg.NetworkRetryCount < 0 {
+		cfg.NetworkRetryCount = 0
+	}
+	if cfg.NetworkRetryBackoff <= 0 {
+		cfg.NetworkRetryBackoff = defaultNetworkRetryBackoff
+	}
 	return cfg
 }
 
@@ -67,20 +76,23 @@ type ImageResult struct {
 }
 
 type ChatGPTClient struct {
-	accessToken     string
-	cookies         string
-	oaiDeviceID     string
-	oaiSessionID    string
-	userAgent       string
-	secCHUA         string
-	secCHUAMobile   string
-	secCHUAPlatform string
-	httpClient      *http.Client
-	streamClient    *http.Client
-	proxyURL        string
-	pollInterval    time.Duration
-	pollMaxWait     time.Duration
-	lastImageRoute  string
+	accessToken          string
+	cookies              string
+	oaiDeviceID          string
+	oaiSessionID         string
+	userAgent            string
+	secCHUA              string
+	secCHUAMobile        string
+	secCHUAPlatform      string
+	httpClient           *http.Client
+	streamClient         *http.Client
+	proxyURL             string
+	pollInterval         time.Duration
+	pollMaxWait          time.Duration
+	lastImageRoute       string
+	networkRetryAttempts int
+	networkRetryBackoff  time.Duration
+	beforeNetworkRetry   NetworkRetryHook
 }
 
 func NewChatGPTClient(accessToken, cookies string) *ChatGPTClient {
@@ -125,8 +137,11 @@ func NewChatGPTClientWithProxyAndAuthData(accessToken, proxyURL string, authData
 			Timeout:   requestConfig.SSETimeout + 30*time.Second,
 			Transport: newChromeTransport(proxyURL),
 		},
-		pollInterval: requestConfig.PollInterval,
-		pollMaxWait:  requestConfig.PollMaxWait,
+		pollInterval:         requestConfig.PollInterval,
+		pollMaxWait:          requestConfig.PollMaxWait,
+		networkRetryAttempts: requestConfig.NetworkRetryCount,
+		networkRetryBackoff:  requestConfig.NetworkRetryBackoff,
+		beforeNetworkRetry:   requestConfig.NetworkRetryHook,
 	}
 }
 
@@ -203,9 +218,14 @@ func (c *ChatGPTClient) GenerateImage(ctx context.Context, prompt, model string,
 
 // DownloadBytes fetches a URL using authenticated headers and returns its raw bytes.
 func (c *ChatGPTClient) DownloadBytes(url string) ([]byte, error) {
-	req, _ := http.NewRequest("GET", url, nil)
-	c.setHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRequestWithRetry(context.Background(), c.httpClient, "download request", func() (*http.Request, error) {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -273,10 +293,14 @@ func (c *ChatGPTClient) uploadFile(ctx context.Context, data []byte, filename, m
 		prePayload["mime_type"] = mimeType
 	}
 	preBody, _ := json.Marshal(prePayload)
-	preReq, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/files", bytes.NewReader(preBody))
-	c.setHeaders(preReq)
-
-	preResp, err := c.httpClient.Do(preReq)
+	preResp, err := c.doRequestWithRetry(ctx, c.httpClient, "pre-upload request", func() (*http.Request, error) {
+		preReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/files", bytes.NewReader(preBody))
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(preReq)
+		return preReq, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("pre-upload request: %w", err)
 	}
@@ -303,10 +327,6 @@ func (c *ChatGPTClient) uploadFile(ctx context.Context, data []byte, filename, m
 
 	// Step 2: Upload to Azure Blob Storage
 	// Use a plain HTTP client (no uTLS needed for Azure)
-	uploadReq, _ := http.NewRequestWithContext(ctx, "PUT", preResult.UploadURL, bytes.NewReader(data))
-	uploadReq.Header.Set("x-ms-blob-type", "BlockBlob")
-	uploadReq.Header.Set("Content-Type", mimeType)
-
 	plainTransport, err := outboundproxy.NewHTTPTransport(c.proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("create upload transport: %w", err)
@@ -315,7 +335,15 @@ func (c *ChatGPTClient) uploadFile(ctx context.Context, data []byte, filename, m
 		Timeout:   60 * time.Second,
 		Transport: plainTransport,
 	}
-	uploadResp, err := plainClient.Do(uploadReq)
+	uploadResp, err := c.doRequestWithRetry(ctx, plainClient, "blob upload request", func() (*http.Request, error) {
+		uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPut, preResult.UploadURL, bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		uploadReq.Header.Set("x-ms-blob-type", "BlockBlob")
+		uploadReq.Header.Set("Content-Type", mimeType)
+		return uploadReq, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("blob upload request: %w", err)
 	}
@@ -344,10 +372,14 @@ func (c *ChatGPTClient) uploadFile(ctx context.Context, data []byte, filename, m
 		}, nil
 	}
 
-	confirmReq, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/files/"+preResult.FileID+"/uploaded", bytes.NewReader([]byte("{}")))
-	c.setHeaders(confirmReq)
-
-	confirmResp, err := c.httpClient.Do(confirmReq)
+	confirmResp, err := c.doRequestWithRetry(ctx, c.httpClient, "confirm upload request", func() (*http.Request, error) {
+		confirmReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/files/"+preResult.FileID+"/uploaded", bytes.NewReader([]byte("{}")))
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(confirmReq)
+		return confirmReq, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("confirm upload request: %w", err)
 	}
@@ -386,13 +418,17 @@ func (c *ChatGPTClient) processUploadStream(ctx context.Context, fileID, useCase
 		"index_for_retrieval": false,
 		"file_name":           filename,
 	})
-	processReq, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/files/process_upload_stream", bytes.NewReader(processBody))
-	c.setHeaders(processReq)
-	processReq.Header.Set("Accept", "text/event-stream")
-	processReq.Header.Set("x-openai-target-path", "/backend-api/files/process_upload_stream")
-	processReq.Header.Set("x-openai-target-route", "/backend-api/files/process_upload_stream")
-
-	processResp, err := c.streamClient.Do(processReq)
+	processResp, err := c.doRequestWithRetry(ctx, c.streamClient, "process upload stream request", func() (*http.Request, error) {
+		processReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/files/process_upload_stream", bytes.NewReader(processBody))
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(processReq)
+		processReq.Header.Set("Accept", "text/event-stream")
+		processReq.Header.Set("x-openai-target-path", "/backend-api/files/process_upload_stream")
+		processReq.Header.Set("x-openai-target-route", "/backend-api/files/process_upload_stream")
+		return processReq, nil
+	})
 	if err != nil {
 		return fmt.Errorf("process upload stream request: %w", err)
 	}
@@ -745,15 +781,19 @@ func (c *ChatGPTClient) doConversationRequest(ctx context.Context, body map[stri
 		return nil, fmt.Errorf("marshal body: %w", err)
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", baseURL+path, bytes.NewReader(jsonBody))
-	c.setHeaders(req)
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("openai-sentinel-chat-requirements-token", chatToken)
-	if proofToken != "" {
-		req.Header.Set("openai-sentinel-proof-token", proofToken)
-	}
-
-	resp, err := c.streamClient.Do(req)
+	resp, err := c.doRequestWithRetry(ctx, c.streamClient, routeLabel+" request", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(jsonBody))
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("openai-sentinel-chat-requirements-token", chatToken)
+		if proofToken != "" {
+			req.Header.Set("openai-sentinel-proof-token", proofToken)
+		}
+		return req, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s request: %w", routeLabel, err)
 	}
@@ -772,10 +812,14 @@ func (c *ChatGPTClient) getSentinelTokens(ctx context.Context) (chatToken, proof
 	reqToken := generateRequirementsTokenForUserAgent(c.userAgent)
 
 	reqBody, _ := json.Marshal(map[string]string{"p": reqToken})
-	req, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/sentinel/chat-requirements", bytes.NewReader(reqBody))
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRequestWithRetry(ctx, c.httpClient, "chat-requirements request", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/sentinel/chat-requirements", bytes.NewReader(reqBody))
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	})
 	if err != nil {
 		return "", "", fmt.Errorf("chat-requirements request: %w", err)
 	}
@@ -978,10 +1022,14 @@ func (c *ChatGPTClient) pollForImages(ctx context.Context, conversationID, rootM
 // fetchConversationImages fetches the full conversation and extracts any image results.
 func (c *ChatGPTClient) fetchConversationImages(ctx context.Context, conversationID, rootMessageID string) ([]ImageResult, error) {
 	url := fmt.Sprintf("%s/conversation/%s", baseURL, conversationID)
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRequestWithRetry(ctx, c.httpClient, "GET conversation request", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1044,10 +1092,14 @@ func (c *ChatGPTClient) fetchConversationImages(ctx context.Context, conversatio
 // getAttachmentURL fetches the download URL for sediment:// assets via the attachment API.
 func (c *ChatGPTClient) getAttachmentURL(ctx context.Context, fileID, conversationID string) (string, error) {
 	url := fmt.Sprintf("%s/conversation/%s/attachment/%s/download", baseURL, conversationID, fileID)
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRequestWithRetry(ctx, c.httpClient, "attachment download request", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	})
 	if err != nil {
 		return "", err
 	}
@@ -1067,10 +1119,14 @@ func (c *ChatGPTClient) getAttachmentURL(ctx context.Context, fileID, conversati
 
 func (c *ChatGPTClient) getDownloadURL(ctx context.Context, fileID, conversationID string) (string, error) {
 	url := fmt.Sprintf("%s/files/download/%s?conversation_id=%s&inline=false", baseURL, fileID, conversationID)
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRequestWithRetry(ctx, c.httpClient, "file download url request", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	})
 	if err != nil {
 		return "", err
 	}

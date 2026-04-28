@@ -244,6 +244,99 @@ export function ServicePathsSection({
         }
       />
 
+      <ToggleField
+        label="网络错误自动重试"
+        hint="官方链路遇到 EOF、超时、连接失败等网络错误时，会先尝试触发 Mihomo 复测，再自动重试。"
+        tooltip={
+          <TooltipDetails
+            items={[
+              {
+                title: "会重试什么",
+                body: <>只针对请求建立阶段的网络错误，例如 EOF、i/o timeout、连接失败，不会把上游明确返回的 403/401 当成网络故障。</>,
+              },
+              {
+                title: "怎么切节点",
+                body: <>如果下面填了 Mihomo 控制地址，后端会在重试前触发一次对应分组的 delay 复测，让 URLTest 组优先切到更健康的节点。</>,
+              },
+              {
+                title: "默认行为",
+                body: <>控制地址留空时，会尝试从代理地址自动推断本机 `:9090` 控制口；推断不到时就只做延迟重试，不强依赖控制口。</>,
+              },
+            ]}
+          />
+        }
+        checked={config.proxy.autoRetryEnabled}
+        onCheckedChange={(checked) =>
+          setConfig((current) => ({
+            ...current,
+            proxy: { ...current.proxy, autoRetryEnabled: checked },
+          }))
+        }
+      />
+
+      <Field
+        label="Mihomo 控制地址"
+        hint="可选。示例：http://127.0.0.1:9090 或容器场景下的 http://172.24.0.1:9090。"
+        tooltip={
+          <TooltipDetails
+            items={[
+              {
+                title: "作用",
+                body: <>用于在网络错误重试前主动调用 Mihomo 控制口的 `Proxy/delay`，让 URLTest 组马上重新测速和切节点。</>,
+              },
+              {
+                title: "留空时",
+                body: <>程序会优先尝试从代理 URL 自动推断控制口地址，例如 `socks5h://172.24.0.1:7892` 会推断成 `http://172.24.0.1:9090`。</>,
+              },
+            ]}
+          />
+        }
+      >
+        <Input
+          value={config.proxy.controllerUrl}
+          onChange={(event) =>
+            setConfig((current) => ({
+              ...current,
+              proxy: { ...current.proxy, controllerUrl: event.target.value },
+            }))
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+
+      <Field
+        label="Mihomo 控制密钥"
+        hint="可选。只有当控制口开启鉴权时才需要填写。"
+      >
+        <Input
+          type="password"
+          value={config.proxy.controllerSecret}
+          onChange={(event) =>
+            setConfig((current) => ({
+              ...current,
+              proxy: { ...current.proxy, controllerSecret: event.target.value },
+            }))
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+
+      <Field
+        label="Mihomo 分组名"
+        hint="默认是 Proxy，对应你当前 Mihomo 配置里的 URLTest 分组名称。"
+      >
+        <Input
+          value={config.proxy.controllerGroup}
+          onChange={(event) =>
+            setConfig((current) => ({
+              ...current,
+              proxy: { ...current.proxy, controllerGroup: event.target.value },
+            }))
+          }
+          className="h-11 rounded-2xl border-stone-200 bg-white shadow-none"
+        />
+      </Field>
+
       <Field
         label="Auth 目录"
         hint="本地认证文件目录。通常保持默认即可。"

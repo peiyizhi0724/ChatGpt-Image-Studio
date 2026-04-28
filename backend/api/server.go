@@ -25,6 +25,7 @@ import (
 	"chatgpt2api/internal/config"
 	"chatgpt2api/internal/mailer"
 	"chatgpt2api/internal/middleware"
+	"chatgpt2api/internal/mihomo"
 	"chatgpt2api/internal/newapi"
 	"chatgpt2api/internal/portalstore"
 	"chatgpt2api/internal/sub2api"
@@ -2119,10 +2120,58 @@ func (s *Server) configuredImageRoute(accountType string) string {
 
 func (s *Server) imageRequestConfig() handler.ImageRequestConfig {
 	return handler.ImageRequestConfig{
-		RequestTimeout: time.Duration(max(1, s.cfg.ChatGPT.RequestTimeout)) * time.Second,
-		SSETimeout:     time.Duration(max(1, s.cfg.ChatGPT.SSETimeout)) * time.Second,
-		PollInterval:   time.Duration(max(1, s.cfg.ChatGPT.PollInterval)) * time.Second,
-		PollMaxWait:    time.Duration(max(1, s.cfg.ChatGPT.PollMaxWait)) * time.Second,
+		RequestTimeout:      time.Duration(max(1, s.cfg.ChatGPT.RequestTimeout)) * time.Second,
+		SSETimeout:          time.Duration(max(1, s.cfg.ChatGPT.SSETimeout)) * time.Second,
+		PollInterval:        time.Duration(max(1, s.cfg.ChatGPT.PollInterval)) * time.Second,
+		PollMaxWait:         time.Duration(max(1, s.cfg.ChatGPT.PollMaxWait)) * time.Second,
+		NetworkRetryCount:   s.proxyNetworkRetryCount(),
+		NetworkRetryBackoff: 1200 * time.Millisecond,
+		NetworkRetryHook:    s.proxyNetworkRetryHook(),
+	}
+}
+
+func (s *Server) proxyNetworkRetryCount() int {
+	if s == nil || s.cfg == nil || !s.cfg.ProxyAutoRetryEnabled() {
+		return 0
+	}
+	return 2
+}
+
+func (s *Server) proxyNetworkRetryHook() handler.NetworkRetryHook {
+	if s == nil || s.cfg == nil || !s.cfg.ProxyAutoRetryEnabled() {
+		return nil
+	}
+
+	return func(ctx context.Context, info handler.NetworkRetryInfo) error {
+		controllerURL := s.cfg.ProxyControllerURL()
+		if strings.TrimSpace(controllerURL) == "" {
+			return nil
+		}
+
+		controller := mihomo.New(
+			controllerURL,
+			s.cfg.ProxyControllerSecret(),
+			s.cfg.ProxyControllerGroup(),
+			"https://chatgpt.com/cdn-cgi/trace",
+			15*time.Second,
+		)
+		result, err := controller.TriggerGroupRetest(ctx)
+		if err != nil {
+			slog.Warn("proxy retry hook failed", "operation", info.Operation, "attempt", info.Attempt, "error", err)
+			return err
+		}
+		if result != nil {
+			slog.Info(
+				"proxy retry hook triggered mihomo retest",
+				"operation", info.Operation,
+				"attempt", info.Attempt,
+				"group", result.Group,
+				"before", result.Before,
+				"after", result.After,
+				"changed", result.Changed,
+			)
+		}
+		return nil
 	}
 }
 

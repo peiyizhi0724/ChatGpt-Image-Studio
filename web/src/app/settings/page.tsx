@@ -127,6 +127,10 @@ function defaultConfigPayload(): ConfigPayload {
       url: "socks5h://127.0.0.1:10808",
       mode: "fixed",
       syncEnabled: false,
+      autoRetryEnabled: true,
+      controllerUrl: "",
+      controllerSecret: "",
+      controllerGroup: "Proxy",
     },
     cpa: {
       baseUrl: "",

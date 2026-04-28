@@ -58,6 +58,52 @@ func TestProxyURLs(t *testing.T) {
 	}
 }
 
+func TestProxyControllerURLUsesExplicitOverride(t *testing.T) {
+	cfg := &Config{
+		Proxy: ProxyConfig{
+			Enabled:          true,
+			URL:              "socks5h://172.24.0.1:7892",
+			Mode:             "fixed",
+			AutoRetryEnabled: true,
+			ControllerURL:    "http://127.0.0.1:19090",
+		},
+	}
+
+	if got := cfg.ProxyControllerURL(); got != "http://127.0.0.1:19090" {
+		t.Fatalf("ProxyControllerURL() = %q, want explicit override", got)
+	}
+}
+
+func TestProxyControllerURLInfersFromPrivateProxyHost(t *testing.T) {
+	cfg := &Config{
+		Proxy: ProxyConfig{
+			Enabled:          true,
+			URL:              "socks5h://172.24.0.1:7892",
+			Mode:             "fixed",
+			AutoRetryEnabled: true,
+		},
+	}
+
+	if got := cfg.ProxyControllerURL(); got != "http://172.24.0.1:9090" {
+		t.Fatalf("ProxyControllerURL() = %q, want inferred host controller", got)
+	}
+}
+
+func TestProxyControllerURLDisabledWhenAutoRetryOff(t *testing.T) {
+	cfg := &Config{
+		Proxy: ProxyConfig{
+			Enabled:          true,
+			URL:              "socks5h://172.24.0.1:7892",
+			Mode:             "fixed",
+			AutoRetryEnabled: false,
+		},
+	}
+
+	if got := cfg.ProxyControllerURL(); got != "" {
+		t.Fatalf("ProxyControllerURL() = %q, want empty when auto retry disabled", got)
+	}
+}
+
 func TestDetectConfigRootFindsBackendFromRepoRoot(t *testing.T) {
 	rootDir := t.TempDir()
 	backendDir := filepath.Join(rootDir, "backend")

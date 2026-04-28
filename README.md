@@ -138,6 +138,50 @@ chmod +x ./scripts/*.sh
 - 多人门户：`http://127.0.0.1:7000`
 - 后台管理：`http://127.0.0.1:7000/admin`
 
+### 本地前端接线上后端
+
+如果你想只在本地调前端，但直接复用线上后端数据和登录态，推荐使用 Vite 开发代理，而不是把前端 API 地址直接改成线上域名。
+
+这样做的好处：
+
+- 浏览器仍然访问本地 `localhost` 页面
+- `/api`、`/portal/api`、`/v1` 等请求会由 Vite 代理转发到线上后端
+- Cookie / Session 调试更稳定，不容易被跨域限制影响
+
+默认情况下：
+
+- 不设置任何变量时，开发态仍然请求本地后端 `http://127.0.0.1:7000`
+
+如果要切到线上后端，例如 `https://mimo.iqei.cn`：
+
+PowerShell：
+
+```powershell
+$env:VITE_API_PROXY_TARGET = "https://mimo.iqei.cn"
+cd portal
+npm run dev
+```
+
+后台管理前端同理：
+
+```powershell
+$env:VITE_API_PROXY_TARGET = "https://mimo.iqei.cn"
+cd web
+npm run dev
+```
+
+如果你就是想临时改成“直连某个后端地址”，也支持：
+
+```powershell
+$env:VITE_API_URL = "http://127.0.0.1:7000"
+```
+
+说明：
+
+- 设置了 `VITE_API_PROXY_TARGET` 时，前端会优先走本地代理模式
+- `VITE_API_URL` 主要用于开发态直连指定后端
+- 两个变量都不设时，仍按原来的默认行为走本地 `7000`
+
 页面路由结构：
 
 - 多人门户首页：`/`
@@ -320,7 +364,16 @@ enabled = true
 url = "socks5h://127.0.0.1:10808"
 mode = "fixed"
 sync_enabled = false
+auto_retry_enabled = true
+controller_url = "http://127.0.0.1:9090"
+controller_group = "Proxy"
 ```
+
+说明：
+
+- `auto_retry_enabled = true` 时，官方图片链路遇到 `EOF`、超时、连接失败这类网络错误，会自动重试，而不是立刻向前端抛错。
+- 如果同时配置了 `controller_url`，后端会在重试前调用 Mihomo 控制口的 `Proxy/delay`，尽量让 `URLTest` 分组先切到更健康的节点再继续请求。
+- 这套自动重试只针对网络错误，不会把上游明确返回的 `401 / 403` 当成“代理坏了”反复重试。
 
 如果你部署的是 `Studio` 官方链路，并且通过宿主机 `mihomo / clash` 给容器提供代理，建议同时阅读：
 

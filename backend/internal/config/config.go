@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -103,10 +105,14 @@ type LogConfig struct {
 }
 
 type ProxyConfig struct {
-	Enabled     bool   `toml:"enabled"`
-	URL         string `toml:"url"`
-	Mode        string `toml:"mode"`
-	SyncEnabled bool   `toml:"sync_enabled"`
+	Enabled          bool   `toml:"enabled"`
+	URL              string `toml:"url"`
+	Mode             string `toml:"mode"`
+	SyncEnabled      bool   `toml:"sync_enabled"`
+	AutoRetryEnabled bool   `toml:"auto_retry_enabled"`
+	ControllerURL    string `toml:"controller_url"`
+	ControllerSecret string `toml:"controller_secret"`
+	ControllerGroup  string `toml:"controller_group"`
 }
 
 type CPAConfig struct {
@@ -549,6 +555,34 @@ func (c *Config) proxyURLLocked(forSync bool) string {
 	return strings.TrimSpace(c.Proxy.URL)
 }
 
+func (c *Config) ProxyAutoRetryEnabled() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.Proxy.Enabled && c.Proxy.AutoRetryEnabled && normalizeProxyMode(c.Proxy.Mode) == "fixed"
+}
+
+func (c *Config) ProxyControllerURL() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return proxyControllerURLLocked(c.Proxy)
+}
+
+func (c *Config) ProxyControllerSecret() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return strings.TrimSpace(c.Proxy.ControllerSecret)
+}
+
+func (c *Config) ProxyControllerGroup() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return proxyControllerGroupLocked(c.Proxy)
+}
+
 func (c *Config) validate() error {
 	if c.Server.MaxImageConcurrency <= 0 {
 		c.Server.MaxImageConcurrency = 8
@@ -616,6 +650,19 @@ func (c *Config) validate() error {
 		return fmt.Errorf("invalid proxy.url: %w", err)
 	}
 
+	if controllerURL := strings.TrimSpace(c.Proxy.ControllerURL); controllerURL != "" {
+		parsed, err := url.Parse(controllerURL)
+		if err != nil {
+			return fmt.Errorf("invalid proxy.controller_url: %w", err)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return fmt.Errorf("invalid proxy.controller_url %q: only http or https are supported", controllerURL)
+		}
+		if strings.TrimSpace(parsed.Host) == "" {
+			return fmt.Errorf("invalid proxy.controller_url %q: host is required", controllerURL)
+		}
+	}
+
 	return nil
 }
 
@@ -625,6 +672,42 @@ func normalizeProxyMode(mode string) string {
 		return "fixed"
 	}
 	return normalized
+}
+
+func proxyControllerURLLocked(proxyCfg ProxyConfig) string {
+	if !proxyCfg.Enabled || !proxyCfg.AutoRetryEnabled || normalizeProxyMode(proxyCfg.Mode) != "fixed" {
+		return ""
+	}
+	if explicit := strings.TrimSpace(proxyCfg.ControllerURL); explicit != "" {
+		return explicit
+	}
+	return inferProxyControllerURL(strings.TrimSpace(proxyCfg.URL))
+}
+
+func proxyControllerGroupLocked(proxyCfg ProxyConfig) string {
+	if group := strings.TrimSpace(proxyCfg.ControllerGroup); group != "" {
+		return group
+	}
+	return "Proxy"
+}
+
+func inferProxyControllerURL(proxyURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(proxyURL))
+	if err != nil {
+		return ""
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return ""
+	}
+	if strings.EqualFold(host, "localhost") || strings.EqualFold(host, "host.docker.internal") {
+		return "http://" + net.JoinHostPort(host, "9090")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
+		return ""
+	}
+	return "http://" + net.JoinHostPort(host, "9090")
 }
 
 func normalizeImageRoute(route string) (string, bool) {

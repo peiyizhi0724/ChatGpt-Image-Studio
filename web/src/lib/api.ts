@@ -248,6 +248,10 @@ export type ConfigPayload = {
     url: string;
     mode: string;
     syncEnabled: boolean;
+    autoRetryEnabled: boolean;
+    controllerUrl: string;
+    controllerSecret: string;
+    controllerGroup: string;
   };
   cpa: {
     baseUrl: string;

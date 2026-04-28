@@ -170,13 +170,14 @@ func (c *ResponsesClient) generateViaResponses(ctx context.Context, prompt, mode
 		return nil, fmt.Errorf("marshal responses payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, codexResponsesBaseURL+"/responses", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create responses request: %w", err)
-	}
-	c.setResponsesHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.backend.doRequestWithRetry(ctx, c.httpClient, "responses request", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, codexResponsesBaseURL+"/responses", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("create responses request: %w", err)
+		}
+		c.setResponsesHeaders(req)
+		return req, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("responses request: %w", err)
 	}

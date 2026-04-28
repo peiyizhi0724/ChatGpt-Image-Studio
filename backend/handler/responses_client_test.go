@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -214,5 +217,47 @@ func TestNewResponsesClientWithProxyAndConfigUsesProvidedSSETimeout(t *testing.T
 	}
 	if client.backend.pollMaxWait != requestConfig.SSETimeout {
 		t.Fatalf("backend poll max wait = %v, want %v", client.backend.pollMaxWait, requestConfig.SSETimeout)
+	}
+}
+
+func TestResponsesGenerateImageRetriesNetworkError(t *testing.T) {
+	requestConfig := ImageRequestConfig{
+		NetworkRetryCount:   1,
+		NetworkRetryBackoff: time.Millisecond,
+	}
+	client := NewResponsesClientWithProxyAndConfig("token", "http://proxy.local", map[string]any{
+		"account_id": "acct-1",
+	}, requestConfig)
+
+	attempts := 0
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, io.EOF
+			}
+			stream := strings.Join([]string{
+				`data: {"type":"response.completed","response":{"output":[{"type":"image_generation_call","result":"aGVsbG8=","output_format":"png"}]}}`,
+				"",
+				`data: [DONE]`,
+				"",
+			}, "\n")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(stream)),
+			}, nil
+		}),
+	}
+
+	images, err := client.GenerateImage(context.Background(), "draw a cat", "gpt-5.4-mini", 1, "1024x1024", "high", "")
+	if err != nil {
+		t.Fatalf("GenerateImage() returned error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if len(images) != 1 {
+		t.Fatalf("GenerateImage() len = %d, want 1", len(images))
 	}
 }

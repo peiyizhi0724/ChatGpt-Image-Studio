@@ -74,10 +74,14 @@ type configPayload struct {
 		ProviderType   string `json:"providerType"`
 	} `json:"sync"`
 	Proxy struct {
-		Enabled     bool   `json:"enabled"`
-		URL         string `json:"url"`
-		Mode        string `json:"mode"`
-		SyncEnabled bool   `json:"syncEnabled"`
+		Enabled          bool   `json:"enabled"`
+		URL              string `json:"url"`
+		Mode             string `json:"mode"`
+		SyncEnabled      bool   `json:"syncEnabled"`
+		AutoRetryEnabled bool   `json:"autoRetryEnabled"`
+		ControllerURL    string `json:"controllerUrl"`
+		ControllerSecret string `json:"controllerSecret"`
+		ControllerGroup  string `json:"controllerGroup"`
 	} `json:"proxy"`
 	CPA struct {
 		BaseURL        string `json:"baseUrl"`
@@ -212,10 +216,14 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			"provider_type":   payload.Sync.ProviderType,
 		},
 		"proxy": {
-			"enabled":      payload.Proxy.Enabled,
-			"url":          payload.Proxy.URL,
-			"mode":         payload.Proxy.Mode,
-			"sync_enabled": payload.Proxy.SyncEnabled,
+			"enabled":            payload.Proxy.Enabled,
+			"url":                payload.Proxy.URL,
+			"mode":               payload.Proxy.Mode,
+			"sync_enabled":       payload.Proxy.SyncEnabled,
+			"auto_retry_enabled": payload.Proxy.AutoRetryEnabled,
+			"controller_url":     payload.Proxy.ControllerURL,
+			"controller_secret":  payload.Proxy.ControllerSecret,
+			"controller_group":   payload.Proxy.ControllerGroup,
 		},
 		"cpa": {
 			"base_url":        payload.CPA.BaseURL,
@@ -349,6 +357,10 @@ func (s *Server) buildConfigPayloadFromConfig(cfg *config.Config) configPayload 
 	payload.Proxy.URL = cfg.Proxy.URL
 	payload.Proxy.Mode = cfg.Proxy.Mode
 	payload.Proxy.SyncEnabled = cfg.Proxy.SyncEnabled
+	payload.Proxy.AutoRetryEnabled = cfg.Proxy.AutoRetryEnabled
+	payload.Proxy.ControllerURL = cfg.Proxy.ControllerURL
+	payload.Proxy.ControllerSecret = cfg.Proxy.ControllerSecret
+	payload.Proxy.ControllerGroup = cfg.Proxy.ControllerGroup
 
 	payload.CPA.BaseURL = cfg.CPA.BaseURL
 	payload.CPA.APIKey = cfg.CPA.APIKey

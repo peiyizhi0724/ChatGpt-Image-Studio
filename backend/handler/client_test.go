@@ -401,3 +401,82 @@ func TestNewChatGPTClientWithProxyAndAuthDataUsesAuthHeaders(t *testing.T) {
 		t.Fatalf("sec-ch-ua-platform = %q, want auth sec-ch-ua-platform", got)
 	}
 }
+
+func TestGetSentinelTokensRetriesNetworkError(t *testing.T) {
+	attempts := 0
+	hookCalls := 0
+	client := &ChatGPTClient{
+		accessToken:          "token",
+		oaiDeviceID:          "device",
+		networkRetryAttempts: 1,
+		networkRetryBackoff:  time.Millisecond,
+		beforeNetworkRetry: func(ctx context.Context, info NetworkRetryInfo) error {
+			hookCalls++
+			if info.Operation != "chat-requirements request" {
+				t.Fatalf("unexpected operation %q", info.Operation)
+			}
+			return nil
+		},
+		httpClient: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				attempts++
+				if attempts == 1 {
+					return nil, io.EOF
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(`{"token":"sentinel","proofofwork":{"required":false}}`)),
+				}, nil
+			}),
+		},
+	}
+
+	token, proof, err := client.getSentinelTokens(context.Background())
+	if err != nil {
+		t.Fatalf("getSentinelTokens() returned error: %v", err)
+	}
+	if token != "sentinel" {
+		t.Fatalf("token = %q, want sentinel", token)
+	}
+	if proof != "" {
+		t.Fatalf("proof = %q, want empty", proof)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("hookCalls = %d, want 1", hookCalls)
+	}
+}
+
+func TestGetSentinelTokensDoesNotRetryHTTP403(t *testing.T) {
+	attempts := 0
+	client := &ChatGPTClient{
+		accessToken:          "token",
+		oaiDeviceID:          "device",
+		networkRetryAttempts: 2,
+		networkRetryBackoff:  time.Millisecond,
+		httpClient: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				attempts++
+				return &http.Response{
+					StatusCode: http.StatusForbidden,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(`{"detail":"forbidden"}`)),
+				}, nil
+			}),
+		},
+	}
+
+	_, _, err := client.getSentinelTokens(context.Background())
+	if err == nil {
+		t.Fatal("expected getSentinelTokens() to fail")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if !strings.Contains(err.Error(), "chat-requirements returned 403") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

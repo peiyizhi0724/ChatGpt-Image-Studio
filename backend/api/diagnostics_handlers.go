@@ -342,6 +342,7 @@ func (s *Server) maskSensitiveConfig(payload configPayload) configPayload {
 	payload.Mail.Password = maskSecret(payload.Mail.Password)
 	payload.Sync.ManagementKey = maskSecret(payload.Sync.ManagementKey)
 	payload.Proxy.URL = maskURLAuth(payload.Proxy.URL)
+	payload.Proxy.ControllerSecret = maskSecret(payload.Proxy.ControllerSecret)
 	payload.NewAPI.Password = maskSecret(payload.NewAPI.Password)
 	payload.NewAPI.AccessToken = maskSecret(payload.NewAPI.AccessToken)
 	payload.NewAPI.SessionCookie = maskSecret(payload.NewAPI.SessionCookie)
