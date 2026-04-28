@@ -6,6 +6,7 @@ import {
   fetchConfig,
   type ImageModel,
   type ImageQuality,
+  type ImageResolutionAccess,
   type InpaintSourceReference,
 } from "@/lib/api";
 import webConfig from "@/constants/common-env";
@@ -51,6 +52,7 @@ export type ImageConversationTurn = {
   model: ImageModel;
   count: number;
   size?: string;
+  resolutionAccess?: ImageResolutionAccess;
   quality?: ImageQuality;
   scale?: string;
   sourceImages?: StoredSourceImage[];
@@ -77,6 +79,7 @@ export type ImageConversation = {
   model: ImageModel;
   count: number;
   size?: string;
+  resolutionAccess?: ImageResolutionAccess;
   quality?: ImageQuality;
   scale?: string;
   sourceImages?: StoredSourceImage[];
@@ -309,6 +312,12 @@ function normalizeImageQuality(
     : undefined;
 }
 
+function normalizeResolutionAccess(
+  value: ImageConversationTurn["resolutionAccess"],
+): ImageResolutionAccess | undefined {
+  return value === "free" || value === "paid" ? value : undefined;
+}
+
 function normalizeImageMode(value: unknown): ImageMode {
   // Keep old local history readable after the deprecated upscale mode was removed.
   return value === "edit" || value === "upscale" ? "edit" : "generate";
@@ -318,6 +327,7 @@ function normalizeTurn(turn: ImageConversationTurn): ImageConversationTurn {
   return {
     ...turn,
     mode: normalizeImageMode(turn.mode),
+    resolutionAccess: normalizeResolutionAccess(turn.resolutionAccess),
     quality: normalizeImageQuality(turn.quality),
     sourceImages: Array.isArray(turn.sourceImages) ? turn.sourceImages : [],
     sourceReference: normalizeSourceReference(turn.sourceReference),
@@ -372,6 +382,7 @@ export function normalizeConversation(
             model: conversation.model,
             count: conversation.count,
             size: conversation.size,
+            resolutionAccess: conversation.resolutionAccess,
             quality: conversation.quality,
             scale: conversation.scale,
             sourceImages: conversation.sourceImages,
@@ -391,6 +402,7 @@ export function normalizeConversation(
     model: latestTurn.model,
     count: latestTurn.count,
     size: latestTurn.size,
+    resolutionAccess: latestTurn.resolutionAccess,
     quality: latestTurn.quality,
     scale: latestTurn.scale,
     sourceImages: latestTurn.sourceImages,

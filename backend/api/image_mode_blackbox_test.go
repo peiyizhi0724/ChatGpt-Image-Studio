@@ -117,7 +117,7 @@ func (c *compatStubWorkflowClient) EditImageByUpload(ctx context.Context, prompt
 	}, nil
 }
 
-func (c *compatStubWorkflowClient) InpaintImageByMask(ctx context.Context, prompt string, model string, originalFileID string, originalGenID string, conversationID string, parentMessageID string, mask []byte) ([]handler.ImageResult, error) {
+func (c *compatStubWorkflowClient) InpaintImageByMask(ctx context.Context, prompt string, model string, originalFileID string, originalGenID string, conversationID string, parentMessageID string, mask []byte, size string, quality string) ([]handler.ImageResult, error) {
 	_ = ctx
 	_ = prompt
 	_ = originalFileID
@@ -125,6 +125,8 @@ func (c *compatStubWorkflowClient) InpaintImageByMask(ctx context.Context, promp
 	_ = conversationID
 	_ = parentMessageID
 	_ = mask
+	_ = size
+	_ = quality
 	c.record("selection-edit", model)
 	if c.inpaintErr != nil {
 		return nil, c.inpaintErr
@@ -206,7 +208,7 @@ func (c *parallelGenerateWorkflowClient) EditImageByUpload(ctx context.Context, 
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (c *parallelGenerateWorkflowClient) InpaintImageByMask(ctx context.Context, prompt string, model string, originalFileID string, originalGenID string, conversationID string, parentMessageID string, mask []byte) ([]handler.ImageResult, error) {
+func (c *parallelGenerateWorkflowClient) InpaintImageByMask(ctx context.Context, prompt string, model string, originalFileID string, originalGenID string, conversationID string, parentMessageID string, mask []byte, size string, quality string) ([]handler.ImageResult, error) {
 	_ = ctx
 	_ = prompt
 	_ = model
@@ -215,6 +217,8 @@ func (c *parallelGenerateWorkflowClient) InpaintImageByMask(ctx context.Context,
 	_ = conversationID
 	_ = parentMessageID
 	_ = mask
+	_ = size
+	_ = quality
 	return nil, fmt.Errorf("not implemented")
 }
 

@@ -538,6 +538,8 @@ func (c *ChatGPTClient) InpaintImageByMask(
 	conversationID string,
 	parentMessageID string,
 	mask []byte,
+	size string,
+	quality string,
 ) ([]ImageResult, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
@@ -563,7 +565,15 @@ func (c *ChatGPTClient) InpaintImageByMask(
 		dalleOp["original_gen_id"] = originalGenID
 	}
 
-	body := c.buildConversationBody(prompt, model, conversationID, parentMessageID, dalleOp)
+	fullPrompt := prompt
+	if strings.TrimSpace(size) != "" && size != "auto" && size != "1024x1024" {
+		fullPrompt = fmt.Sprintf("Edit and output the image with size %s. %s", size, prompt)
+	}
+	if quality == "hd" || quality == "high" {
+		fullPrompt = fmt.Sprintf("Generate a high-quality, detailed edited image: %s", fullPrompt)
+	}
+
+	body := c.buildConversationBody(fullPrompt, model, conversationID, parentMessageID, dalleOp)
 	body["client_prepare_state"] = "sent"
 	body["supported_encodings"] = []string{"v1"}
 	return c.doConversation(ctx, body)

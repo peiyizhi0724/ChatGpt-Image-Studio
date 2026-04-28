@@ -76,43 +76,37 @@ export default function RequestsPage() {
   }, [pageCount, safePage]);
 
   return (
-    <section className="h-full overflow-y-auto lg:min-h-0 lg:overflow-hidden">
-      <div className="mx-auto flex min-h-full max-w-[1440px] flex-col px-1 py-1 lg:h-full lg:min-h-0">
-        <div className="rounded-[30px] border border-stone-200 bg-[#fcfcfb] px-4 py-5 shadow-[0_14px_40px_rgba(15,23,42,0.05)] sm:px-5 sm:py-6 lg:flex-1 lg:min-h-0 lg:px-6 lg:py-7">
-          <div className="flex flex-col gap-6 lg:h-full lg:min-h-0">
-            <div className="rounded-[30px] border border-stone-200 bg-white px-5 py-5 shadow-[0_14px_40px_rgba(15,23,42,0.05)] sm:px-6">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="min-w-0">
-                  <div className="flex items-start gap-4">
-                    <div className="inline-flex size-12 shrink-0 items-center justify-center rounded-[18px] bg-stone-950 text-white shadow-sm">
-                      <Activity className="size-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <h1 className="text-2xl font-semibold tracking-tight text-stone-950">
-                        调用请求
-                      </h1>
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 w-full rounded-full border-stone-200 bg-white px-4 text-stone-700 shadow-none sm:w-auto"
-                  onClick={() => void loadItems()}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <RefreshCw className="size-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="size-4" />
-                  )}
-                  刷新记录
-                </Button>
-              </div>
+    <section className="h-full">
+      <div className="hide-scrollbar h-full min-h-0 overflow-y-auto rounded-[30px] border border-stone-200 bg-[#fcfcfb] px-4 py-5 shadow-[0_14px_40px_rgba(15,23,42,0.05)] transition-colors duration-200 dark:border-[var(--studio-border)] dark:bg-[var(--studio-panel)] sm:px-5 sm:py-6 lg:flex lg:min-h-0 lg:flex-col lg:px-6 lg:py-7">
+        <section className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="inline-flex size-12 items-center justify-center rounded-[18px] bg-stone-950 text-white shadow-sm">
+              <Activity className="size-5" />
             </div>
+            <div className="space-y-1">
+              <h1 className="text-2xl font-semibold tracking-tight text-stone-950">
+                调用请求
+              </h1>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-full border-stone-200 bg-white px-4 text-stone-700 shadow-none sm:w-auto"
+            onClick={() => void loadItems()}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <RefreshCw className="size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="size-4" />
+            )}
+            刷新记录
+          </Button>
+        </section>
 
-            <Card className="overflow-hidden rounded-2xl border-white/80 bg-white/90 shadow-sm lg:flex-1 lg:min-h-0">
-              <CardContent className="p-0 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+        <Card className="mt-5 overflow-hidden rounded-2xl border-white/80 bg-white/90 shadow-sm lg:flex-1 lg:min-h-0">
+          <CardContent className="p-0 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
                 <div className="space-y-4 p-4 lg:hidden">
                   {currentRows.map((item) => (
                     <div
@@ -479,10 +473,8 @@ export default function RequestsPage() {
                     </div>
                   </div>
                 ) : null}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </section>
   );

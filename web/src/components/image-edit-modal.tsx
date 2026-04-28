@@ -6,6 +6,13 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -34,8 +41,26 @@ type ImageEditModalProps = {
   imageName: string;
   imageSrc: string;
   isSubmitting?: boolean;
+  allowOutputOptions?: boolean;
+  imageAspectRatio?: string;
+  imageAspectRatioOptions?: Array<{ label: string; value: string }>;
+  imageResolutionTier?: string;
+  imageResolutionTierOptions?: Array<{ label: string; value: string; disabled?: boolean }>;
+  imageQuality?: string;
+  imageQualityOptions?: Array<{ label: string; value: string; description: string }>;
+  imageQualityDisabled?: boolean;
+  imageQualityDisabledReason?: string;
+  onImageAspectRatioChange?: (value: string) => void;
+  onImageResolutionTierChange?: (value: string) => void;
+  onImageQualityChange?: (value: string) => void;
   onClose: () => void;
-  onSubmit: (payload: { prompt: string; mask: MaskPayload }) => Promise<void>;
+  onSubmit: (payload: {
+    prompt: string;
+    mask: MaskPayload;
+    aspectRatio?: string;
+    resolutionTier?: string;
+    quality?: string;
+  }) => Promise<void>;
 };
 
 function clampPoint(value: number) {
@@ -96,6 +121,18 @@ export function ImageEditModal({
   imageName,
   imageSrc,
   isSubmitting = false,
+  allowOutputOptions = false,
+  imageAspectRatio = "1:1",
+  imageAspectRatioOptions = [],
+  imageResolutionTier = "sd",
+  imageResolutionTierOptions = [],
+  imageQuality = "high",
+  imageQualityOptions = [],
+  imageQualityDisabled = false,
+  imageQualityDisabledReason = "",
+  onImageAspectRatioChange,
+  onImageResolutionTierChange,
+  onImageQualityChange,
   onClose,
   onSubmit,
 }: ImageEditModalProps) {
@@ -464,12 +501,22 @@ export function ImageEditModal({
 
     try {
       const mask = await buildMaskPayload();
-      await onSubmit({ prompt: trimmedPrompt, mask });
+      await onSubmit({
+        prompt: trimmedPrompt,
+        mask,
+        aspectRatio: allowOutputOptions ? imageAspectRatio : undefined,
+        resolutionTier: allowOutputOptions ? imageResolutionTier : undefined,
+        quality: allowOutputOptions ? imageQuality : undefined,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "提交编辑失败";
       toast.error(message);
     }
   };
+
+  const currentResolutionTierLabel =
+    imageResolutionTierOptions.find((item) => item.value === imageResolutionTier)
+      ?.label ?? imageResolutionTier;
 
   if (!open) {
     return null;
@@ -484,7 +531,7 @@ export function ImageEditModal({
       aria-label="选区编辑"
     >
       <div className="flex h-full flex-col touch-auto" onClick={(event) => event.stopPropagation()}>
-        <header className="border-b border-stone-200 px-4 py-3 sm:px-5 sm:py-4">
+        <header className="border-b border-stone-200 px-4 py-2.5 sm:px-5 sm:py-3">
           <div className="hide-scrollbar flex items-center gap-2 overflow-x-auto">
             <button
               type="button"
@@ -494,77 +541,78 @@ export function ImageEditModal({
               <X className="size-5" />
             </button>
 
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 w-9 rounded-full px-0 sm:h-10 sm:w-auto sm:px-4"
-              onClick={handleUndo}
-              disabled={!hasSelection || isSubmitting}
-              aria-label="撤销"
-              title="撤销"
-            >
-              <Undo2 className="size-4" />
-              <span className="hidden sm:inline">撤销</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 w-9 rounded-full px-0 sm:h-10 sm:w-auto sm:px-4"
-              onClick={handleRedo}
-              disabled={redoStrokes.length === 0 || isSubmitting}
-              aria-label="重做"
-              title="重做"
-            >
-              <Redo2 className="size-4" />
-              <span className="hidden sm:inline">重做</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 w-9 rounded-full px-0 sm:h-10 sm:w-auto sm:px-4"
-              onClick={handleClear}
-              disabled={(!hasSelection && !currentStroke) || isSubmitting}
-              aria-label="清空"
-              title="清空"
-            >
-              <Trash2 className="size-4" />
-              <span className="hidden sm:inline">清空</span>
-            </Button>
-            <Button
-              variant={selectionMode ? "default" : "outline"}
-              size="sm"
-              className={cn(
-                "h-9 rounded-full px-3 sm:h-10 sm:px-4",
-                selectionMode ? "bg-stone-950 text-white hover:bg-stone-800" : "",
-              )}
-              onClick={() => setSelectionMode((value) => !value)}
-              disabled={isSubmitting}
-            >
-              <Brush className="size-4" />
-              <span>{selectionMode ? "选择中" : "选择"}</span>
-            </Button>
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="hidden text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400 sm:inline sm:text-xs">
+                  笔刷
+                </span>
+                <Input
+                  type="range"
+                  min="16"
+                  max="96"
+                  step="2"
+                  value={brushSize}
+                  onChange={(event) => setBrushSize(Number(event.target.value))}
+                  className="h-8 w-[112px] border-0 bg-transparent px-0 sm:w-[148px]"
+                />
+                <span className="min-w-9 text-right text-sm font-medium text-stone-700">
+                  {brushSize}px
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 rounded-full px-0 sm:h-10 sm:w-auto sm:px-4"
+                onClick={handleUndo}
+                disabled={!hasSelection || isSubmitting}
+                aria-label="撤销"
+                title="撤销"
+              >
+                <Undo2 className="size-4" />
+                <span className="hidden sm:inline">撤销</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 rounded-full px-0 sm:h-10 sm:w-auto sm:px-4"
+                onClick={handleRedo}
+                disabled={redoStrokes.length === 0 || isSubmitting}
+                aria-label="重做"
+                title="重做"
+              >
+                <Redo2 className="size-4" />
+                <span className="hidden sm:inline">重做</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 rounded-full px-0 sm:h-10 sm:w-auto sm:px-4"
+                onClick={handleClear}
+                disabled={(!hasSelection && !currentStroke) || isSubmitting}
+                aria-label="清空"
+                title="清空"
+              >
+                <Trash2 className="size-4" />
+                <span className="hidden sm:inline">清空</span>
+              </Button>
+              <Button
+                variant={selectionMode ? "default" : "outline"}
+                size="sm"
+                className={cn(
+                  "h-9 rounded-full px-3 sm:h-10 sm:px-4",
+                  selectionMode ? "bg-stone-950 text-white hover:bg-stone-800" : "",
+                )}
+                onClick={() => setSelectionMode((value) => !value)}
+                disabled={isSubmitting}
+              >
+                <Brush className="size-4" />
+                <span>{selectionMode ? "选择中" : "选择"}</span>
+              </Button>
             </div>
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-hidden px-4 py-4 sm:px-6 sm:py-6">
-          <div className="w-full max-w-[1200px] rounded-2xl border border-stone-200 bg-stone-50 px-3 py-2.5 sm:px-4 sm:py-3">
-            <div className="flex items-center justify-end gap-3">
-              <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400 sm:text-xs">笔刷</span>
-              <Input
-                type="range"
-                min="16"
-                max="96"
-                step="2"
-                value={brushSize}
-                onChange={(event) => setBrushSize(Number(event.target.value))}
-                className="h-8 w-[128px] border-0 bg-transparent px-0 sm:w-[160px]"
-              />
-              <span className="min-w-9 text-right text-sm font-medium text-stone-700">{brushSize}px</span>
-            </div>
-          </div>
-
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-hidden px-4 py-2 sm:px-6 sm:py-3">
           <div
             ref={previewFrameRef}
             className="flex min-h-0 w-full flex-1 items-center justify-center overflow-auto rounded-[28px] border border-stone-200 bg-[#f8f7f4] p-3 touch-auto sm:p-6"
@@ -639,14 +687,90 @@ export function ImageEditModal({
           </div>
         </div>
 
-        <footer className="border-t border-stone-200 px-4 py-3 sm:px-6 sm:py-5">
-          <div
-            className={cn(
-              "mx-auto flex w-full max-w-[920px] gap-3 rounded-[28px] border border-stone-200 bg-white px-3 py-2.5 shadow-[0_18px_48px_rgba(28,25,23,0.08)] sm:gap-4 sm:rounded-[32px] sm:px-5 sm:py-4",
-              isPromptExpanded ? "items-end" : "items-center",
-            )}
-          >
-            <div className="relative flex-1">
+        <footer className="border-t border-stone-200 px-4 py-2.5 sm:px-6 sm:py-4">
+          <div className="relative mx-auto flex w-full max-w-[920px] items-end gap-3 rounded-[28px] border border-stone-200 bg-white px-3 py-2.5 shadow-[0_18px_48px_rgba(28,25,23,0.08)] sm:gap-4 sm:rounded-[32px] sm:px-5 sm:py-4">
+            <div className="min-w-0 flex-1">
+              {allowOutputOptions ? (
+                <div className="hide-scrollbar -mx-1 mb-2 flex items-center gap-2 overflow-x-auto px-1 pb-1">
+                  <Select
+                    value={imageAspectRatio}
+                    onValueChange={(value) => onImageAspectRatioChange?.(value)}
+                  >
+                    <SelectTrigger className="h-9 w-[88px] shrink-0 rounded-full border-stone-200 bg-white text-[13px] font-medium text-stone-700 shadow-none focus-visible:ring-0 sm:w-[108px] sm:text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {imageAspectRatioOptions.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={imageResolutionTier}
+                    onValueChange={(value) =>
+                      onImageResolutionTierChange?.(value)
+                    }
+                  >
+                    <SelectTrigger
+                      className="h-9 w-[168px] shrink-0 rounded-full border-stone-200 bg-white text-[13px] font-medium text-stone-700 shadow-none focus-visible:ring-0 sm:w-[238px] sm:text-sm"
+                      title={currentResolutionTierLabel}
+                    >
+                      <SelectValue>{currentResolutionTierLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {imageResolutionTierOptions.map((item) => (
+                        <SelectItem
+                          key={item.value}
+                          value={item.value}
+                          disabled={item.disabled}
+                        >
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={imageQuality}
+                    onValueChange={(value) => onImageQualityChange?.(value)}
+                    disabled={imageQualityDisabled}
+                  >
+                    <SelectTrigger
+                      className={cn(
+                        "h-9 w-[118px] shrink-0 rounded-full border-stone-200 bg-white text-[13px] font-medium text-stone-700 shadow-none focus-visible:ring-0 sm:w-[136px] sm:text-sm",
+                        imageQualityDisabled &&
+                          "cursor-not-allowed bg-stone-50 text-stone-400 opacity-80",
+                      )}
+                      title={
+                        imageQualityDisabled
+                          ? imageQualityDisabledReason
+                          : imageQualityOptions.find(
+                              (item) => item.value === imageQuality,
+                            )?.description
+                      }
+                    >
+                      <SelectValue>
+                        {`质量 ${
+                          imageQualityOptions.find(
+                            (item) => item.value === imageQuality,
+                          )?.label ?? imageQuality
+                        }`}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {imageQualityOptions.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          <span title={item.description}>{`质量 ${item.label}`}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+            <div className="relative">
               {isPromptExpanded ? (
                 <>
                 <button
@@ -665,14 +789,14 @@ export function ImageEditModal({
                   onChange={(event) => setPrompt(event.target.value)}
                   onFocus={() => setIsPromptExpanded(true)}
                   placeholder="描述要怎么改"
-                  className="min-h-[72px] max-h-[180px] resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1 py-1 pr-8 text-[14px] leading-6 text-stone-900 shadow-none focus-visible:ring-0 sm:min-h-[88px] sm:max-h-none sm:text-[15px] sm:leading-7"
+                  className="min-h-[72px] max-h-[180px] resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1 py-1 pr-12 text-[14px] leading-6 text-stone-900 shadow-none focus-visible:ring-0 sm:min-h-[88px] sm:max-h-none sm:pr-14 sm:text-[15px] sm:leading-7"
                 />
                 </>
               ) : (
                 <>
                   <button
                     type="button"
-                    className="flex h-10 w-full items-center px-1 text-left text-[14px] leading-5 text-stone-400 sm:hidden"
+                    className="flex h-10 w-full items-center px-1 pr-12 text-left text-[14px] leading-5 text-stone-400 sm:hidden"
                     onClick={() => setIsPromptExpanded(true)}
                   >
                     <span className="block w-full truncate">{prompt.trim() || "描述要怎么改"}</span>
@@ -687,15 +811,18 @@ export function ImageEditModal({
                 </>
               )}
             </div>
-            <Button
-              size="icon"
-              className="size-9 shrink-0 rounded-full bg-stone-950 text-white hover:bg-stone-800 sm:size-11"
-              onClick={() => void handleSubmit()}
-              disabled={isSubmitting}
-              aria-label="提交编辑"
-            >
-              {isSubmitting ? <LoaderCircle className="size-4 animate-spin sm:size-5" /> : <ArrowUp className="size-4 sm:size-5" />}
-            </Button>
+            <div className="absolute right-3 bottom-2.5 flex shrink-0 items-end sm:right-5 sm:bottom-4">
+              <Button
+                size="icon"
+                className="size-9 rounded-full bg-stone-950 text-white hover:bg-stone-800 sm:size-11"
+                onClick={() => void handleSubmit()}
+                disabled={isSubmitting}
+                aria-label="提交编辑"
+              >
+                {isSubmitting ? <LoaderCircle className="size-4 animate-spin sm:size-5" /> : <ArrowUp className="size-4 sm:size-5" />}
+              </Button>
+            </div>
+          </div>
           </div>
         </footer>
       </div>

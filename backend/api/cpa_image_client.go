@@ -217,7 +217,11 @@ func (c *cpaImageClient) InpaintImageByMask(
 	conversationID string,
 	parentMessageID string,
 	mask []byte,
+	size string,
+	quality string,
 ) ([]handler.ImageResult, error) {
+	_ = size
+	_ = quality
 	return nil, newRequestError("source_context_missing", "CPA 路由不支持上下文选区编辑，将自动回退为源图加遮罩编辑")
 }
 
