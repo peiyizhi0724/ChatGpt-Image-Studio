@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Images, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users } from "lucide-react";
+import { ChevronDown, ChevronUp, Images, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users } from "lucide-react";
 
 import { PortalAvatar } from "@/components/portal-avatar";
 import { fetchVersionInfo } from "@/lib/api";
@@ -21,9 +21,11 @@ export function TopNav() {
   const { user, logout } = usePortalSession();
   const [versionLabel, setVersionLabel] = useState("读取中");
   const [collapsed, setCollapsed] = useState(pathname.startsWith("/workspace"));
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     setCollapsed(pathname.startsWith("/workspace"));
+    setIsMobileMenuOpen(false); // Close mobile menu when navigating
   }, [pathname]);
 
   useEffect(() => {
@@ -74,6 +76,14 @@ export function TopNav() {
               </span>
             </Link>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="flex size-10 items-center justify-center rounded-2xl border border-stone-200 bg-white text-stone-600 transition hover:bg-stone-50"
+                onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+                aria-label={isMobileMenuOpen ? "关闭菜单" : "展开菜单"}
+              >
+                {isMobileMenuOpen ? <ChevronUp className="size-5" /> : <ChevronDown className="size-5" />}
+              </button>
               <PortalAvatar src={user?.avatar_url} name={user?.display_name} email={user?.email} className="size-10" />
               <button
                 type="button"
@@ -85,30 +95,32 @@ export function TopNav() {
             </div>
           </div>
 
-          <nav className="mt-3 grid gap-2">
-            {navItems.map((item) => {
-              const active = pathname === item.href;
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  to={item.href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-2xl px-3 py-3 transition",
-                    active ? "bg-white text-stone-950 shadow-sm" : "bg-white/60 text-stone-600 hover:bg-white hover:text-stone-900",
-                  )}
-                >
-                  <span className={cn("flex size-9 items-center justify-center rounded-xl", active ? "bg-stone-950 text-white" : "bg-white text-stone-600")}>
-                    <Icon className="size-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{item.label}</span>
-                    <span className="block truncate text-xs text-stone-500">{item.description}</span>
-                  </span>
-                </Link>
-              );
-            })}
-          </nav>
+          {isMobileMenuOpen && (
+            <nav className="mt-3 grid gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+              {navItems.map((item) => {
+                const active = pathname === item.href;
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    to={item.href}
+                    className={cn(
+                      "flex items-center gap-3 rounded-2xl px-3 py-3 transition",
+                      active ? "bg-white text-stone-950 shadow-sm" : "bg-white/60 text-stone-600 hover:bg-white hover:text-stone-900",
+                    )}
+                  >
+                    <span className={cn("flex size-9 items-center justify-center rounded-xl", active ? "bg-stone-950 text-white" : "bg-white text-stone-600")}>
+                      <Icon className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{item.label}</span>
+                      <span className="block truncate text-xs text-stone-500">{item.description}</span>
+                    </span>
+                  </Link>
+                );
+              })}
+            </nav>
+          )}
         </div>
       </header>
 

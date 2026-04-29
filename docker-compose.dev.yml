@@ -1,0 +1,31 @@
+services:
+  backend:
+    image: golang:1.26-alpine
+    working_dir: /workspace/backend
+    command: sh -c "go mod download && go run ."
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 7000
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "7000:7000"
+    volumes:
+      - .:/workspace
+
+  portal:
+    image: node:24-alpine
+    working_dir: /workspace/portal
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5174"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "5174:5174"
+    volumes:
+      - .:/workspace
+      - portal_node_modules:/workspace/portal/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  portal_node_modules:

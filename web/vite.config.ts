@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type PluginOption } from "vite";
+import { defineConfig, loadEnv, type PluginOption } from "vite";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,15 +28,39 @@ function syncBackendStaticPlugin(): PluginOption {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), syncBackendStaticPlugin()],
-  base: "/admin/",
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+const proxyPaths = ["/api", "/portal/api", "/v1", "/auth", "/version", "/health"];
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const proxyTarget = env.VITE_API_PROXY_TARGET?.trim().replace(/\/$/, "");
+  const proxy = proxyTarget
+    ? Object.fromEntries(
+        proxyPaths.map((pathname) => [
+          pathname,
+          {
+            target: proxyTarget,
+            changeOrigin: true,
+            secure: false,
+          },
+        ]),
+      )
+    : undefined;
+
+  return {
+    plugins: [react(), tailwindcss(), syncBackendStaticPlugin()],
+    base: "/admin/",
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
+      },
     },
-  },
-  build: {
-    outDir: "dist",
-  },
+    build: {
+      outDir: "dist",
+    },
+    server: proxy
+      ? {
+          proxy,
+        }
+      : undefined,
+  };
 });

@@ -435,8 +435,8 @@ func (s *Store) GetWork(ctx context.Context, workID, viewerUserID string) (Galle
 			c.created_at
 		FROM portal_gallery_comments c
 		LEFT JOIN portal_users u ON u.id = c.user_id
-		WHERE work_id = ?
-		ORDER BY created_at ASC
+		WHERE c.work_id = ?
+		ORDER BY c.created_at ASC
 	`, workID)
 	if err != nil {
 		return GalleryWork{}, nil, err

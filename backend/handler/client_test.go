@@ -324,6 +324,7 @@ func TestShouldFallbackFromFConversation(t *testing.T) {
 	}{
 		{name: "request error falls back", err: io.ErrUnexpectedEOF, want: false},
 		{name: "labeled request error falls back", err: errors.New("f conversation request: dial tcp timeout"), want: true},
+		{name: "4xx response falls back", err: errors.New("f conversation returned 403: <html>forbidden</html>"), want: true},
 		{name: "5xx response falls back", err: errors.New("f conversation returned 500: boom"), want: true},
 		{name: "sse read error does not fall back", err: errors.New("SSE read error: unexpected EOF"), want: false},
 		{name: "internal error marker alone does not fall back", err: errors.New("internal_error"), want: false},

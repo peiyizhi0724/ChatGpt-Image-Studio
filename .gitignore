@@ -61,9 +61,24 @@ Thumbs.db
 /web/next-env.d.ts
 /web/vite-watch.out.log
 /web/vite-watch.err.log
+/portal/node_modules/
+/portal/.next/
+/portal/dist/
+/portal/out/
+/portal/coverage/
+/portal/build/
+/portal/.env*
+/portal/*.tsbuildinfo
+/portal/next-env.d.ts
+/portal/vite-watch.out.log
+/portal/vite-watch.err.log
 
 # Package manager noise
 /web/npm-debug.log*
 /web/yarn-debug.log*
 /web/yarn-error.log*
 /web/.pnpm-debug.log*
+/portal/npm-debug.log*
+/portal/yarn-debug.log*
+/portal/yarn-error.log*
+/portal/.pnpm-debug.log*

@@ -1587,7 +1587,7 @@ func (s *Server) handleWebApp(w http.ResponseWriter, r *http.Request) {
 
 	if isAdminWebPath(r.URL.Path) {
 		requestPath := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/admin"), "/")
-		asset := resolveStaticAsset(s.getStaticDir(), requestPath)
+		asset := resolveStaticAssetFromDirs(s.adminStaticDirs(), requestPath)
 		if asset == "" {
 			http.NotFound(w, r)
 			return
@@ -1602,12 +1602,34 @@ func (s *Server) handleWebApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestPath := strings.TrimPrefix(r.URL.Path, "/")
-	asset := resolveStaticAsset(s.portalStaticDir, requestPath)
+	asset := resolveStaticAssetFromDirs(s.portalStaticDirs(), requestPath)
 	if asset == "" {
 		http.NotFound(w, r)
 		return
 	}
 	http.ServeFile(w, r, asset)
+}
+
+func (s *Server) adminStaticDirs() []string {
+	if s == nil || s.cfg == nil {
+		return nonEmptyStrings([]string{s.getStaticDir()})
+	}
+	return uniqueStaticDirs(
+		s.getStaticDir(),
+		s.cfg.ResolvePath(s.cfg.Server.StaticDir),
+		filepath.Join(s.cfg.Paths().Root, "static"),
+	)
+}
+
+func (s *Server) portalStaticDirs() []string {
+	if s == nil || s.cfg == nil {
+		return nonEmptyStrings([]string{s.portalStaticDir})
+	}
+	return uniqueStaticDirs(
+		s.portalStaticDir,
+		s.cfg.ResolvePath("portal-static"),
+		filepath.Join(s.cfg.Paths().Root, "portal-static"),
+	)
 }
 
 func isAdminWebPath(path string) bool {
@@ -1762,6 +1784,34 @@ func resolveStaticAsset(staticDir, requestPath string) string {
 		return indexPath
 	}
 	return ""
+}
+
+func resolveStaticAssetFromDirs(staticDirs []string, requestPath string) string {
+	for _, staticDir := range uniqueStaticDirs(staticDirs...) {
+		if asset := resolveStaticAsset(staticDir, requestPath); asset != "" {
+			return asset
+		}
+	}
+	return ""
+}
+
+func uniqueStaticDirs(dirs ...string) []string {
+	result := make([]string, 0, len(dirs))
+	seen := make(map[string]struct{}, len(dirs))
+	for _, dir := range dirs {
+		cleaned := strings.TrimSpace(dir)
+		if cleaned == "" {
+			continue
+		}
+		normalized := filepath.Clean(cleaned)
+		key := strings.ToLower(normalized)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
 }
 
 func readImagesFromMultipart(form *multipart.Form) ([][]byte, error) {

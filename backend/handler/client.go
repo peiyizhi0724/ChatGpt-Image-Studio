@@ -1208,6 +1208,7 @@ func shouldFallbackFromFConversation(err error) bool {
 		return false
 	}
 	return strings.Contains(message, "f conversation request:") ||
+		strings.Contains(message, "f conversation returned 4") ||
 		strings.Contains(message, "f conversation returned 5")
 }
 

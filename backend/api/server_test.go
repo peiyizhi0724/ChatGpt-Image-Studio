@@ -142,6 +142,48 @@ func TestResolveImageFilePathFallsBackToOtherDataDirectories(t *testing.T) {
 	}
 }
 
+func TestHandleWebAppServesAdminAssetsFromConfiguredStaticFallback(t *testing.T) {
+	rootDir := t.TempDir()
+	cfg := config.New(rootDir)
+	if err := cfg.Load(); err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	staticDir := filepath.Join(rootDir, "static")
+	assetsDir := filepath.Join(staticDir, "assets")
+	if err := os.MkdirAll(assetsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(assetsDir) returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("<!doctype html><title>admin</title>"), 0o644); err != nil {
+		t.Fatalf("WriteFile(index.html) returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(assetsDir, "index-test.css"), []byte("body{color:black}"), 0o644); err != nil {
+		t.Fatalf("WriteFile(index-test.css) returned error: %v", err)
+	}
+
+	server := NewServer(cfg, nil, nil, nil)
+	if server.portalStore != nil {
+		t.Cleanup(func() {
+			_ = server.portalStore.Close()
+		})
+	}
+	server.staticDir = filepath.Join(rootDir, "missing-static")
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/assets/index-test.css", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); body != "body{color:black}" {
+		t.Fatalf("body = %q", body)
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/css") {
+		t.Fatalf("content-type = %q, want text/css", contentType)
+	}
+}
+
 func TestImportImageConversationsIntoSQLiteTarget(t *testing.T) {
 	rootDir := t.TempDir()
 	cfg := config.New(rootDir)
