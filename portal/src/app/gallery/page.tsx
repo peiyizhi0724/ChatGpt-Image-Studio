@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Copy, Download, Heart, ImageIcon, LoaderCircle, Maximize2, MessageCircle, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { Check, Copy, Download, Heart, ImageIcon, LoaderCircle, Maximize2, MessageCircle, RefreshCw, Search, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppImage as Image } from "@/components/app-image";
@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createPortalGalleryComment,
+  deletePortalGalleryWork,
   fetchPortalGalleryWork,
   fetchPortalGalleryWorks,
   togglePortalGalleryLike,
@@ -25,6 +26,7 @@ import {
   type PortalGalleryWork,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { usePortalSession } from "@/store/session";
 
 type GallerySort = "latest" | "likes" | "comments";
 
@@ -111,6 +113,7 @@ function buildDownloadName(work: PortalGalleryWork) {
 }
 
 export default function GalleryPage() {
+  const { user: currentUser } = usePortalSession();
   const [works, setWorks] = useState<PortalGalleryWork[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sort, setSort] = useState<GallerySort>("latest");
@@ -122,6 +125,7 @@ export default function GalleryPage() {
   const [commentContent, setCommentContent] = useState("");
   const [isCommentSubmitting, setIsCommentSubmitting] = useState(false);
   const [likingWorkId, setLikingWorkId] = useState<string | null>(null);
+  const [deletingWorkId, setDeletingWorkId] = useState<string | null>(null);
   const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
   const [copiedType, setCopiedType] = useState<string | null>(null);
 
@@ -186,6 +190,28 @@ export default function GalleryPage() {
       }
     },
     [updateWorkCache],
+  );
+
+  const handleDeleteWork = useCallback(
+    async (workId: string) => {
+      if (!window.confirm("确定要删除这张作品吗？删除后不可恢复。")) {
+        return;
+      }
+      setDeletingWorkId(workId);
+      try {
+        await deletePortalGalleryWork(workId);
+        setWorks((current) => current.filter((item) => item.id !== workId));
+        if (selectedWork?.id === workId) {
+          setSelectedWork(null);
+        }
+        toast.success("作品已删除");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "删除失败");
+      } finally {
+        setDeletingWorkId(null);
+      }
+    },
+    [selectedWork?.id],
   );
 
   const handleSubmitComment = useCallback(async () => {
@@ -421,6 +447,20 @@ export default function GalleryPage() {
                       >
                         <Copy className="size-4.5" />
                       </button>
+                      {(currentUser?.role === "admin" || currentUser?.id === work.user_id) && (
+                        <button
+                          type="button"
+                          className="flex size-9 items-center justify-center rounded-full bg-rose-500/80 text-white backdrop-blur-md transition hover:bg-rose-600"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDeleteWork(work.id);
+                          }}
+                          disabled={deletingWorkId === work.id}
+                          title="删除作品"
+                        >
+                          {deletingWorkId === work.id ? <LoaderCircle className="size-4.5 animate-spin" /> : <Trash2 className="size-4.5" />}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -518,6 +558,22 @@ export default function GalleryPage() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-2.5">
+                    {(currentUser?.role === "admin" || currentUser?.id === selectedWork.user_id) && (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        className="h-10 rounded-xl font-semibold bg-rose-600 hover:bg-rose-700"
+                        disabled={deletingWorkId === selectedWork.id}
+                        onClick={() => void handleDeleteWork(selectedWork.id)}
+                      >
+                        {deletingWorkId === selectedWork.id ? (
+                          <LoaderCircle className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="mr-2 size-4" />
+                        )}
+                        删除作品
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       className={cn(
@@ -528,7 +584,7 @@ export default function GalleryPage() {
                       onClick={() => void handleToggleLike(selectedWork.id)}
                     >
                       {likingWorkId === selectedWork.id ? (
-                        <LoaderCircle className="size-4 animate-spin" />
+                        <LoaderCircle className="mr-2 size-4 animate-spin" />
                       ) : (
                         <Heart className={cn("mr-2 size-4", selectedWork.liked_by_viewer && "fill-current")} />
                       )}

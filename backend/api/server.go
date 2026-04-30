@@ -423,6 +423,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /portal/api/gallery/works/{id}", s.requirePortalUser(http.HandlerFunc(s.handlePortalGalleryWork)))
 	mux.Handle("POST /portal/api/gallery/works/{id}/likes/toggle", s.requirePortalUser(http.HandlerFunc(s.handlePortalToggleGalleryLike)))
 	mux.Handle("POST /portal/api/gallery/works/{id}/comments", s.requirePortalUser(http.HandlerFunc(s.handlePortalCreateGalleryComment)))
+	mux.Handle("DELETE /portal/api/gallery/works/{id}", s.requirePortalUser(http.HandlerFunc(s.handlePortalDeleteGalleryWork)))
 	mux.Handle("GET /portal/api/admin/users", s.requirePortalAdmin(http.HandlerFunc(s.handlePortalAdminUsers)))
 	mux.Handle("PATCH /portal/api/admin/users/{id}", s.requirePortalAdmin(http.HandlerFunc(s.handlePortalAdminUpdateUser)))
 
