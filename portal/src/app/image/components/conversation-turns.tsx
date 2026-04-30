@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   RotateCcw,
   Sparkles,
+  Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -132,6 +133,18 @@ type ConversationTurnsProps = {
     image: StoredImage,
     nextMode: ImageMode,
   ) => void;
+  publishedImageKeys: Set<string>;
+  publishingImageKey: string | null;
+  buildPublishRecordKey: (
+    conversationId: string,
+    turnId: string,
+    imageId: string,
+  ) => string;
+  onPublishImage: (
+    conversationId: string,
+    turn: ImageConversationTurn,
+    image: StoredImage,
+  ) => Promise<void>;
   onRetryTurn: (
     conversationId: string,
     turn: ImageConversationTurn,
@@ -157,6 +170,10 @@ export const ConversationTurns = memo(function ConversationTurns({
   formatProcessingDuration,
   onOpenSelectionEditor,
   onSeedFromResult,
+  publishedImageKeys,
+  publishingImageKey,
+  buildPublishRecordKey,
+  onPublishImage,
   onRetryTurn,
   onCancelTurn,
 }: ConversationTurnsProps) {
@@ -336,6 +353,13 @@ export const ConversationTurns = memo(function ConversationTurns({
                       turn.id,
                       index,
                     );
+                    const publishRecordKey = buildPublishRecordKey(
+                      conversationId,
+                      turn.id,
+                      image.id,
+                    );
+                    const published = publishedImageKeys.has(publishRecordKey);
+                    const publishing = publishingImageKey === publishRecordKey;
 
                     return (
                       <div
@@ -401,6 +425,41 @@ export const ConversationTurns = memo(function ConversationTurns({
                               >
                                 <Download className="size-4" />
                               </a>
+                              <button
+                                type="button"
+                                className={cn(
+                                  "inline-flex size-9 items-center justify-center rounded-full border transition",
+                                  published
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100 hover:text-stone-900",
+                                )}
+                                onClick={() =>
+                                  void onPublishImage(
+                                    conversationId,
+                                    turn,
+                                    image,
+                                  )
+                                }
+                                title={
+                                  published
+                                    ? "已发布到作品广场"
+                                    : publishing
+                                      ? "正在发布"
+                                      : "发布到作品广场"
+                                }
+                                aria-label={
+                                  published
+                                    ? "已发布到作品广场"
+                                    : "发布到作品广场"
+                                }
+                                disabled={published || publishing}
+                              >
+                                {publishing ? (
+                                  <LoaderCircle className="size-4 animate-spin" />
+                                ) : (
+                                  <Upload className="size-4" />
+                                )}
+                              </button>
                             </div>
                           </div>
                         ) : image.status === "error" ? (

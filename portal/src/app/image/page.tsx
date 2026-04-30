@@ -14,12 +14,19 @@ import {
   fetchAccounts,
   fetchConfig,
   listImageTasks,
+  publishPortalGalleryWork,
   type Account,
   type ImageTaskSnapshot,
   type ImageTaskView,
   type ImageQuality,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import {
+  buildGalleryPublishRecordKey,
+  listGalleryPublishRecords,
+  saveGalleryPublishRecord,
+  type GalleryPublishRecord,
+} from "@/store/gallery-publish-records";
 import {
   normalizeConversation,
   saveImageConversation,
@@ -46,7 +53,7 @@ import { WorkspaceHeader } from "./components/workspace-header";
 import { useImageHistory } from "./hooks/use-image-history";
 import { useImageSourceInputs } from "./hooks/use-image-source-inputs";
 import { useImageSubmit } from "./hooks/use-image-submit";
-import { buildConversationPreviewSource } from "./view-utils";
+import { buildConversationPreviewSource, buildImageDataUrl } from "./view-utils";
 
 type ImageAspectRatio = "auto" | "1:1" | "4:3" | "3:2" | "16:9" | "21:9" | "9:16";
 type ImageResolutionTier = "auto-free" | "auto-paid" | "sd" | "2k" | "4k";
@@ -154,6 +161,19 @@ const modeLabelMap: Record<ImageMode, string> = {
 
 function formatResolutionLabel(value: string) {
   return value.replace("x", " x ");
+}
+
+function buildGalleryWorkPrompt(turn: ImageConversationTurn) {
+  const prompt = turn.prompt.trim();
+  if (prompt) {
+    return prompt;
+  }
+  return `${modeLabelMap[turn.mode]}作品`;
+}
+
+function buildGalleryWorkTitle(turn: ImageConversationTurn) {
+  const prompt = buildGalleryWorkPrompt(turn);
+  return prompt.length > 24 ? `${prompt.slice(0, 24)}...` : prompt;
 }
 
 const inspirationExamples: Array<{
@@ -607,6 +627,12 @@ export default function ImagePage() {
     useState(true);
   const [taskItems, setTaskItems] = useState<ImageTaskView[]>([]);
   const [cancellingTaskIds, setCancellingTaskIds] = useState<string[]>([]);
+  const [publishedRecords, setPublishedRecords] = useState<
+    Record<string, GalleryPublishRecord>
+  >({});
+  const [publishingImageKey, setPublishingImageKey] = useState<string | null>(
+    null,
+  );
   const [taskSnapshot, setTaskSnapshot] = useState<ImageTaskSnapshot>(
     buildEmptyTaskSnapshot(),
   );
@@ -702,6 +728,10 @@ export default function ImagePage() {
     }
     return next;
   }, [activeTaskByTurnKey, selectedConversationId]);
+  const publishedImageKeys = useMemo(
+    () => new Set(Object.keys(publishedRecords)),
+    [publishedRecords],
+  );
 
   const displayedConversations = useMemo(() => {
     const tasksByTurnKey = new Map<string, ImageTaskView[]>();
@@ -963,6 +993,25 @@ export default function ImagePage() {
       window.cancelAnimationFrame(frame);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listGalleryPublishRecords()
+      .then((records) => {
+        if (!cancelled && mountedRef.current) {
+          setPublishedRecords(records);
+        }
+      })
+      .catch(() => {
+        if (!cancelled && mountedRef.current) {
+          setPublishedRecords({});
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1497,6 +1546,68 @@ export default function ImagePage() {
       resetComposer,
     });
 
+  const handlePublishTurnImage = useCallback(
+    async (
+      conversationId: string,
+      turn: ImageConversationTurn,
+      image: StoredImage,
+    ) => {
+      const imageDataUrl = buildImageDataUrl(image);
+      if (!imageDataUrl) {
+        toast.error("当前结果图不可用");
+        return;
+      }
+
+      const recordKey = buildGalleryPublishRecordKey(
+        conversationId,
+        turn.id,
+        image.id,
+      );
+      if (publishedRecords[recordKey]) {
+        toast.message("这张图片已经发布过了");
+        return;
+      }
+
+      setPublishingImageKey(recordKey);
+      try {
+        const prompt = buildGalleryWorkPrompt(turn);
+        const payload = await publishPortalGalleryWork({
+          title: buildGalleryWorkTitle(turn),
+          prompt,
+          image_data_url: imageDataUrl.startsWith("data:")
+            ? imageDataUrl
+            : undefined,
+          image_url: imageDataUrl.startsWith("data:") ? undefined : imageDataUrl,
+          model: turn.model,
+          size: turn.size,
+        });
+
+        const record: GalleryPublishRecord = {
+          key: recordKey,
+          work_id: payload.item.id,
+          published_at: new Date().toISOString(),
+        };
+        await saveGalleryPublishRecord(record);
+        if (!mountedRef.current) {
+          return;
+        }
+
+        setPublishedRecords((current) => ({
+          ...current,
+          [recordKey]: record,
+        }));
+        toast.success("已发布到作品广场");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "发布失败");
+      } finally {
+        if (mountedRef.current) {
+          setPublishingImageKey(null);
+        }
+      }
+    },
+    [publishedRecords],
+  );
+
   const handleCancelTurn = useCallback(
     async (conversationId: string, turn: ImageConversationTurn) => {
       const runtimeTask =
@@ -1617,6 +1728,10 @@ export default function ImagePage() {
               formatProcessingDuration={formatProcessingDuration}
               onOpenSelectionEditor={openSelectionEditor}
               onSeedFromResult={seedFromResult}
+              publishedImageKeys={publishedImageKeys}
+              publishingImageKey={publishingImageKey}
+              buildPublishRecordKey={buildGalleryPublishRecordKey}
+              onPublishImage={handlePublishTurnImage}
               onRetryTurn={handleRetryTurn}
               onCancelTurn={handleCancelTurn}
             />

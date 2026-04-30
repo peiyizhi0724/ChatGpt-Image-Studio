@@ -368,20 +368,20 @@ export default function GalleryPage() {
               当前还没有可展示的公开作品。先在“我的作品”或“图片工作台”中发布几张作品到广场吧。
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="columns-1 gap-4 sm:columns-2 xl:columns-3 2xl:columns-4">
               {works.map((work) => (
                 <article
                   key={work.id}
-                  className="group overflow-hidden rounded-[26px] border border-stone-200 bg-[#fafaf8] shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(15,23,42,0.09)]"
+                  className="group mb-4 break-inside-avoid overflow-hidden rounded-[26px] border border-stone-200 bg-[#fafaf8] shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(15,23,42,0.09)]"
                 >
                   <div
-                    className="relative aspect-square cursor-pointer overflow-hidden bg-stone-100"
+                    className="relative cursor-pointer overflow-hidden bg-stone-100"
                     onClick={() => void openWork(work)}
                   >
                     <Image
                       src={work.image_url}
                       alt={work.title}
-                      className="block h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                      className="block h-auto w-full object-contain transition duration-500 group-hover:scale-[1.015]"
                     />
                     <button
                       type="button"

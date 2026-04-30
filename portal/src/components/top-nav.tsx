@@ -5,6 +5,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Images, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users } from "lucide-react";
 
 import { PortalAvatar } from "@/components/portal-avatar";
+import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { fetchVersionInfo } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { usePortalSession } from "@/store/session";
@@ -63,7 +64,7 @@ export function TopNav() {
   return (
     <>
       <header className="lg:hidden">
-        <div className="rounded-[26px] border border-stone-200 bg-[#f0f0ed] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+        <div className="rounded-[26px] border border-stone-200 bg-[#f0f0ed] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] transition-colors duration-200 dark:border-[var(--studio-border)] dark:bg-[var(--studio-panel)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
           <div className="flex items-center justify-between gap-3">
             <Link to="/workspace" className="flex min-w-0 items-center gap-3 rounded-2xl px-1 py-1 transition hover:bg-white/70">
               <span className="flex size-10 items-center justify-center rounded-2xl bg-white text-stone-900 shadow-sm">
@@ -75,6 +76,7 @@ export function TopNav() {
               </span>
             </Link>
             <div className="flex items-center gap-2">
+              <ThemeToggleButton className="size-10 shrink-0" />
               <PortalAvatar src={user?.avatar_url} name={user?.display_name} email={user?.email} className="size-10" />
               <button
                 type="button"
@@ -114,7 +116,7 @@ export function TopNav() {
       </header>
 
       <aside className={cn("hidden shrink-0 transition-[width] duration-200 lg:flex", collapsed ? "w-[92px]" : "w-[228px]")}>
-        <div className="flex h-full w-full flex-col rounded-[28px] border border-stone-200 bg-[#f0f0ed] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+        <div className="flex h-full w-full flex-col rounded-[28px] border border-stone-200 bg-[#f0f0ed] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] transition-colors duration-200 dark:border-[var(--studio-border)] dark:bg-[var(--studio-panel)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
           <div className={cn("gap-2", collapsed ? "flex flex-col items-center" : "flex items-center justify-between")}>
             <Link
               to="/workspace"
@@ -145,6 +147,15 @@ export function TopNav() {
             >
               {collapsed ? <PanelLeftOpen className="size-5" /> : <PanelLeftClose className="size-4" />}
             </button>
+          </div>
+
+          <div className={cn("mt-3", collapsed ? "flex justify-center" : "flex items-center gap-2")}>
+            <ThemeToggleButton className={cn(collapsed ? "size-11" : "size-10")} />
+            {!collapsed ? (
+              <span className="text-xs font-medium text-stone-500 dark:text-[var(--studio-text-muted)]">
+                主题切换
+              </span>
+            ) : null}
           </div>
 
           <nav className="mt-4 space-y-1">
