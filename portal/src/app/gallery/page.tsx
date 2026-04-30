@@ -1,7 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Copy, Download, Heart, LoaderCircle, MessageCircle, RefreshCw, Search, Sparkles } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Download,
+  Heart,
+  ImageIcon,
+  LoaderCircle,
+  Maximize2,
+  MessageCircle,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { AppImage as Image } from "@/components/app-image";
@@ -18,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createPortalGalleryComment,
+  deletePortalGalleryWork,
   fetchPortalGalleryWork,
   fetchPortalGalleryWorks,
   togglePortalGalleryLike,
@@ -25,6 +40,7 @@ import {
   type PortalGalleryWork,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { usePortalSession } from "@/store/session";
 
 type GallerySort = "latest" | "likes" | "comments";
 
@@ -67,13 +83,42 @@ async function copyText(text: string) {
   const value = text.trim();
   if (!value) {
     toast.warning("没有可复制的提示词");
-    return;
+    return false;
   }
   try {
     await navigator.clipboard.writeText(value);
     toast.success("提示词已复制");
+    return true;
   } catch {
     toast.error("复制失败");
+    return false;
+  }
+}
+
+async function copyImage(imageUrl: string) {
+  if (!imageUrl) {
+    toast.warning("没有可复制的图片");
+    return false;
+  }
+  try {
+    const response = await fetch(imageUrl);
+    const blob = await response.blob();
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        [blob.type || "image/png"]: blob,
+      }),
+    ]);
+    toast.success("图片已复制");
+    return true;
+  } catch {
+    try {
+      await navigator.clipboard.writeText(imageUrl);
+      toast.success("当前浏览器不支持直接复制图片，已复制图片地址");
+      return true;
+    } catch {
+      toast.error("复制图片失败");
+      return false;
+    }
   }
 }
 
@@ -83,6 +128,7 @@ function buildDownloadName(work: PortalGalleryWork) {
 }
 
 export default function GalleryPage() {
+  const { user: currentUser } = usePortalSession();
   const [works, setWorks] = useState<PortalGalleryWork[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sort, setSort] = useState<GallerySort>("latest");
@@ -94,6 +140,9 @@ export default function GalleryPage() {
   const [commentContent, setCommentContent] = useState("");
   const [isCommentSubmitting, setIsCommentSubmitting] = useState(false);
   const [likingWorkId, setLikingWorkId] = useState<string | null>(null);
+  const [deletingWorkId, setDeletingWorkId] = useState<string | null>(null);
+  const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
+  const [copiedType, setCopiedType] = useState<string | null>(null);
 
   const loadWorks = useCallback(async (nextSort: GallerySort, nextQuery: string, silent = false) => {
     if (!silent) {
@@ -156,6 +205,28 @@ export default function GalleryPage() {
       }
     },
     [updateWorkCache],
+  );
+
+  const handleDeleteWork = useCallback(
+    async (workId: string) => {
+      if (!window.confirm("确定要删除这张作品吗？删除后不可恢复。")) {
+        return;
+      }
+      setDeletingWorkId(workId);
+      try {
+        await deletePortalGalleryWork(workId);
+        setWorks((current) => current.filter((item) => item.id !== workId));
+        if (selectedWork?.id === workId) {
+          setSelectedWork(null);
+        }
+        toast.success("作品已删除");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "删除失败");
+      } finally {
+        setDeletingWorkId(null);
+      }
+    },
+    [selectedWork?.id],
   );
 
   const handleSubmitComment = useCallback(async () => {
@@ -301,17 +372,108 @@ export default function GalleryPage() {
               {works.map((work) => (
                 <article
                   key={work.id}
-                  className="overflow-hidden rounded-[26px] border border-stone-200 bg-[#fafaf8] shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+                  className="group overflow-hidden rounded-[26px] border border-stone-200 bg-[#fafaf8] shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(15,23,42,0.09)]"
                 >
-                  <button type="button" className="block w-full text-left" onClick={() => void openWork(work)}>
-                    <div className="relative overflow-hidden bg-stone-100">
-                      <Image
-                        src={work.image_url}
-                        alt={work.title}
-                        className="block aspect-square w-full object-cover transition duration-300 hover:scale-[1.02]"
-                      />
+                  <div
+                    className="relative aspect-square cursor-pointer overflow-hidden bg-stone-100"
+                    onClick={() => void openWork(work)}
+                  >
+                    <Image
+                      src={work.image_url}
+                      alt={work.title}
+                      className="block h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                    />
+                    <button
+                      type="button"
+                      className={cn(
+                        "absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1.5 text-[11px] font-semibold text-white backdrop-blur-md transition hover:bg-black/60",
+                        work.liked_by_viewer && "text-rose-300",
+                      )}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleToggleLike(work.id);
+                      }}
+                      disabled={likingWorkId === work.id}
+                      title="点赞"
+                    >
+                      {likingWorkId === work.id ? (
+                        <LoaderCircle className="size-3 animate-spin" />
+                      ) : (
+                        <Heart className={cn("size-3.5", work.liked_by_viewer && "fill-current")} />
+                      )}
+                      {work.like_count}
+                    </button>
+
+                    <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2 bg-gradient-to-t from-black/55 to-transparent p-4 transition-opacity duration-300 lg:opacity-0 lg:group-hover:opacity-100">
+                      <button
+                        type="button"
+                        className="flex size-9 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition hover:bg-black/65"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void openWork(work);
+                        }}
+                        title="查看评论"
+                      >
+                        <MessageCircle className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="flex size-9 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition hover:bg-black/65"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setZoomedImageUrl(work.image_url);
+                        }}
+                        title="放大图片"
+                      >
+                        <Maximize2 className="size-4" />
+                      </button>
+                      <a
+                        href={work.image_url}
+                        download={buildDownloadName(work)}
+                        className="flex size-9 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition hover:bg-black/65"
+                        title="下载图片"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <Download className="size-4" />
+                      </a>
+                      <button
+                        type="button"
+                        className="flex size-9 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition hover:bg-black/65"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void copyImage(work.image_url);
+                        }}
+                        title="复制图片"
+                      >
+                        <ImageIcon className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="flex size-9 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition hover:bg-black/65"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void copyText(work.prompt);
+                        }}
+                        title="复制提示词"
+                      >
+                        <Copy className="size-4" />
+                      </button>
+                      {(currentUser?.role === "admin" || currentUser?.id === work.user_id) && (
+                        <button
+                          type="button"
+                          className="flex size-9 items-center justify-center rounded-full bg-rose-500/85 text-white backdrop-blur-md transition hover:bg-rose-600"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDeleteWork(work.id);
+                          }}
+                          disabled={deletingWorkId === work.id}
+                          title="删除作品"
+                        >
+                          {deletingWorkId === work.id ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                        </button>
+                      )}
                     </div>
-                  </button>
+                  </div>
 
                   <div className="space-y-3 px-4 py-4">
                     <div className="flex items-center gap-3">
@@ -389,7 +551,7 @@ export default function GalleryPage() {
       <Dialog open={Boolean(selectedWork)} onOpenChange={(open) => (!open ? setSelectedWork(null) : null)}>
         <DialogContent className="w-[min(96vw,1180px)] max-h-[90vh] overflow-y-auto rounded-[24px] border border-stone-200 bg-white p-0 lg:overflow-hidden lg:rounded-[30px]">
           {selectedWork ? (
-            <div className="flex min-h-0 flex-col lg:grid lg:max-h-[90vh] lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="flex min-h-0 flex-col lg:grid lg:max-h-[90vh] lg:grid-cols-[minmax(0,1fr)_380px]">
               <div className="bg-[#f7f7f4] p-4 sm:p-5 lg:min-h-0 lg:overflow-auto">
                 <div className="overflow-hidden rounded-[24px] border border-stone-200 bg-white shadow-sm">
                   <Image src={selectedWork.image_url} alt={selectedWork.title} className="block h-auto w-full object-contain" />
@@ -428,27 +590,81 @@ export default function GalleryPage() {
                   {selectedWork.prompt}
                 </div>
 
-                <div className="mt-5 flex flex-wrap gap-2">
+                <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                  {(currentUser?.role === "admin" || currentUser?.id === selectedWork.user_id) && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      className="h-10 rounded-xl bg-rose-600 font-semibold hover:bg-rose-700"
+                      disabled={deletingWorkId === selectedWork.id}
+                      onClick={() => void handleDeleteWork(selectedWork.id)}
+                    >
+                      {deletingWorkId === selectedWork.id ? (
+                        <LoaderCircle className="mr-2 size-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="mr-2 size-4" />
+                      )}
+                      删除作品
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     className={cn(
-                      "rounded-full",
+                      "h-10 rounded-xl font-semibold",
                       selectedWork.liked_by_viewer ? "bg-rose-600 text-white hover:bg-rose-500" : "bg-stone-950 text-white hover:bg-stone-800",
                     )}
                     disabled={likingWorkId === selectedWork.id}
                     onClick={() => void handleToggleLike(selectedWork.id)}
                   >
-                    {likingWorkId === selectedWork.id ? <LoaderCircle className="size-4 animate-spin" /> : <Heart className="size-4" />}
+                    {likingWorkId === selectedWork.id ? (
+                      <LoaderCircle className="mr-2 size-4 animate-spin" />
+                    ) : (
+                      <Heart className={cn("mr-2 size-4", selectedWork.liked_by_viewer && "fill-current")} />
+                    )}
                     {selectedWork.liked_by_viewer ? "已点赞" : "点赞作品"}
                   </Button>
-                  <Button type="button" variant="outline" className="rounded-full" onClick={() => void copyText(selectedWork.prompt)}>
-                    <Copy className="size-4" />
-                    复制提示词
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 rounded-xl border-stone-200 bg-white font-medium text-stone-700"
+                    onClick={async () => {
+                      const success = await copyImage(selectedWork.image_url);
+                      if (success) {
+                        setCopiedType("detail-image");
+                        setTimeout(() => setCopiedType(null), 2000);
+                      }
+                    }}
+                  >
+                    {copiedType === "detail-image" ? (
+                      <Check className="mr-2 size-4 text-emerald-500" />
+                    ) : (
+                      <ImageIcon className="mr-2 size-4" />
+                    )}
+                    {copiedType === "detail-image" ? "已复制图片" : "复制图片"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 rounded-xl border-stone-200 bg-white font-medium text-stone-700"
+                    onClick={async () => {
+                      const success = await copyText(selectedWork.prompt);
+                      if (success) {
+                        setCopiedType("detail-prompt");
+                        setTimeout(() => setCopiedType(null), 2000);
+                      }
+                    }}
+                  >
+                    {copiedType === "detail-prompt" ? (
+                      <Check className="mr-2 size-4 text-emerald-500" />
+                    ) : (
+                      <Copy className="mr-2 size-4" />
+                    )}
+                    {copiedType === "detail-prompt" ? "已复制提示词" : "复制提示词"}
                   </Button>
                   <a
                     href={selectedWork.image_url}
                     download={buildDownloadName(selectedWork)}
-                    className="inline-flex h-10 items-center gap-2 rounded-full border border-stone-200 bg-white px-4 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
                   >
                     <Download className="size-4" />
                     下载图片
@@ -456,7 +672,10 @@ export default function GalleryPage() {
                 </div>
 
                 <div className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-stone-200 bg-stone-50">
-                  <div className="border-b border-stone-200 px-4 py-3 text-sm font-medium text-stone-700">评论区</div>
+                  <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3">
+                    <span className="text-sm font-medium text-stone-700">评论区</span>
+                    <span className="text-xs text-stone-400">{comments.length} 条评论</span>
+                  </div>
                   <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
                     {isDetailLoading ? (
                       <div className="flex items-center gap-2 text-sm text-stone-500">
@@ -514,6 +733,24 @@ export default function GalleryPage() {
                   </div>
                 </div>
               </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(zoomedImageUrl)} onOpenChange={(open) => (!open ? setZoomedImageUrl(null) : null)}>
+        <DialogContent className="max-h-[94vh] w-[min(96vw,1280px)] overflow-hidden rounded-[28px] border border-stone-200 bg-stone-950 p-0">
+          {zoomedImageUrl ? (
+            <div className="relative">
+              <button
+                type="button"
+                className="absolute top-4 right-4 z-10 flex size-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-md transition hover:bg-white/25"
+                onClick={() => setZoomedImageUrl(null)}
+                title="关闭"
+              >
+                <X className="size-5" />
+              </button>
+              <Image src={zoomedImageUrl} alt="放大的作品图片" className="block max-h-[94vh] w-full object-contain" />
             </div>
           ) : null}
         </DialogContent>

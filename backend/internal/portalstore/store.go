@@ -467,6 +467,39 @@ func (s *Store) GetWork(ctx context.Context, workID, viewerUserID string) (Galle
 	return item, comments, nil
 }
 
+func (s *Store) DeleteWork(ctx context.Context, workID string) error {
+	workID = strings.TrimSpace(workID)
+	if workID == "" {
+		return ErrNotFound
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	exists, err := workExistsTx(ctx, tx, workID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM portal_gallery_comments WHERE work_id = ?`, workID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM portal_gallery_likes WHERE work_id = ?`, workID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM portal_gallery_works WHERE id = ?`, workID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (s *Store) ToggleLike(ctx context.Context, workID, userID string) (LikeToggleResult, error) {
 	workID = strings.TrimSpace(workID)
 	userID = strings.TrimSpace(userID)

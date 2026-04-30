@@ -113,25 +113,77 @@ cd ChatGpt-Image-Studio
 
 ### 启动开发环境
 
+当前推荐直接使用 `scripts/` 里的明确入口，不再使用旧的 `dev.ps1` / `dev.sh`。
+
+#### 1. 本地调后台管理，数据走线上
+
 Windows：
 
 ```powershell
-./scripts/dev.ps1
+./scripts/start-admin.ps1
 ```
 
 macOS / Linux：
 
 ```bash
 chmod +x ./scripts/*.sh
-./scripts/dev.sh
+./scripts/start-admin.sh
 ```
 
-开发脚本会自动完成：
+默认本地地址：`http://127.0.0.1:5173/admin`
 
-1. 安装前端依赖
-2. 构建 `web/dist`
-3. 同步前端资源到 `backend/static`
-4. 启动 Go 后端
+#### 2. 本地调多人门户，数据走线上
+
+Windows：
+
+```powershell
+./scripts/start-portal.ps1
+```
+
+macOS / Linux：
+
+```bash
+./scripts/start-portal.sh
+```
+
+默认本地地址：`http://127.0.0.1:5174`
+
+#### 3. 只启动本地 Go 后端
+
+Windows：
+
+```powershell
+./scripts/start-backend.ps1
+```
+
+macOS / Linux：
+
+```bash
+./scripts/start-backend.sh
+```
+
+默认本地地址：`http://127.0.0.1:7000`
+
+#### 4. 启动整套本地联调
+
+这个模式会：
+
+1. 确保 `web/` 和 `portal/` 依赖存在
+2. 先构建一次后台管理和多人门户静态资源
+3. 启动 `build:watch`，持续同步到 `backend/static` 和 `backend/portal-static`
+4. 启动本地 Go 后端
+
+Windows：
+
+```powershell
+./scripts/start-stack-local.ps1
+```
+
+macOS / Linux：
+
+```bash
+./scripts/start-stack-local.sh
+```
 
 默认地址：
 
@@ -150,9 +202,12 @@ chmod +x ./scripts/*.sh
 
 默认情况下：
 
-- 不设置任何变量时，开发态仍然请求本地后端 `http://127.0.0.1:7000`
+- 直接手工执行 `npm run dev` 时，开发态仍然请求本地后端 `http://127.0.0.1:7000`
+- 使用 `scripts/start-admin.*` 或 `scripts/start-portal.*` 时，会默认代理到 `https://mimo.iqei.cn`
 
-如果要切到线上后端，例如 `https://mimo.iqei.cn`：
+现在 `start-admin.*` 和 `start-portal.*` 默认就会把前端代理到 `https://mimo.iqei.cn`。
+
+如果你想手动改成别的后端，例如 `https://mimo.iqei.cn`：
 
 PowerShell：
 

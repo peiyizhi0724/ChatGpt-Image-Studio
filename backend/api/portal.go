@@ -546,6 +546,39 @@ func (s *Server) handlePortalCreateGalleryComment(w http.ResponseWriter, r *http
 	})
 }
 
+func (s *Server) handlePortalDeleteGalleryWork(w http.ResponseWriter, r *http.Request) {
+	user, ok := portalUserFromContext(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+	store, err := s.portalGalleryStore()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	workID := r.PathValue("id")
+	// 仅管理员或作品发布者本人可以删除
+	if user.Role != "admin" {
+		item, _, err := store.GetWork(r.Context(), workID, user.ID)
+		if err != nil {
+			writeJSON(w, statusForPortalGalleryError(err), map[string]any{"error": err.Error()})
+			return
+		}
+		if item.UserID != user.ID {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied"})
+			return
+		}
+	}
+
+	if err := store.DeleteWork(r.Context(), workID); err != nil {
+		writeJSON(w, statusForPortalGalleryError(err), map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
 func (s *Server) requirePortalUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := s.portalUserFromRequest(r)

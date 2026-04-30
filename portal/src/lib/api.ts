@@ -287,6 +287,12 @@ export async function createPortalGalleryComment(workId: string, content: string
   );
 }
 
+export async function deletePortalGalleryWork(workId: string) {
+  return httpRequest<{ status: string }>(`/portal/api/gallery/works/${encodeURIComponent(workId)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchAccounts() {
   const payload = await fetchPortalWorkspaceBootstrap();
   return { items: payload.accounts };
@@ -400,4 +406,8 @@ export async function upscaleImage({
     method: "POST",
     body: formData,
   });
+}
+
+export async function fetchPortalAdminUsers() {
+  return httpRequest<PortalUsersResponse>("/portal/api/admin/users");
 }
