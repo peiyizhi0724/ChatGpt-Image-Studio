@@ -63,6 +63,14 @@ function formatDate(value: string) {
   }).format(date);
 }
 
+function formatCardDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 function maskEmail(value: string) {
   const email = String(value || "").trim();
   const atIndex = email.indexOf("@");
@@ -264,8 +272,8 @@ export default function GalleryPage() {
 
   return (
     <section className="flex h-full min-h-0 flex-col gap-3">
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_140px_140px_140px]">
+        <div className="rounded-[30px] border border-stone-200 bg-white px-6 py-5 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
           <div className="flex items-start gap-4">
             <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-stone-950 text-white">
               <Sparkles className="size-5" />
@@ -279,19 +287,17 @@ export default function GalleryPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-          <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
-            <div className="text-sm font-medium text-stone-500">广场作品</div>
-            <div className="mt-3 text-3xl font-semibold tracking-tight text-stone-950">{galleryStats.works}</div>
-          </div>
-          <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
-            <div className="text-sm font-medium text-stone-500">累计点赞</div>
-            <div className="mt-3 text-3xl font-semibold tracking-tight text-stone-950">{galleryStats.likes}</div>
-          </div>
-          <div className="rounded-[30px] border border-stone-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
-            <div className="text-sm font-medium text-stone-500">累计评论</div>
-            <div className="mt-3 text-3xl font-semibold tracking-tight text-stone-950">{galleryStats.comments}</div>
-          </div>
+        <div className="rounded-[26px] border border-stone-200 bg-white px-5 py-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
+          <div className="text-xs font-medium text-stone-500">广场作品</div>
+          <div className="mt-2 text-3xl font-semibold tracking-tight text-stone-950">{galleryStats.works}</div>
+        </div>
+        <div className="rounded-[26px] border border-stone-200 bg-white px-5 py-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
+          <div className="text-xs font-medium text-stone-500">累计点赞</div>
+          <div className="mt-2 text-3xl font-semibold tracking-tight text-stone-950">{galleryStats.likes}</div>
+        </div>
+        <div className="rounded-[26px] border border-stone-200 bg-white px-5 py-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
+          <div className="text-xs font-medium text-stone-500">累计评论</div>
+          <div className="mt-2 text-3xl font-semibold tracking-tight text-stone-950">{galleryStats.comments}</div>
         </div>
       </div>
 
@@ -316,11 +322,11 @@ export default function GalleryPage() {
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
                   placeholder="搜索标题、提示词、作者昵称或邮箱"
-                  className="h-11 rounded-2xl border-stone-200 bg-stone-50 pl-10"
+                  className="h-11 rounded-2xl border-stone-200 bg-white pl-10 shadow-sm"
                 />
               </div>
               <div className="flex gap-2">
-                <Button type="submit" className="h-11 flex-1 rounded-2xl bg-stone-950 text-white hover:bg-stone-800 sm:flex-none">
+                <Button type="submit" className="h-11 flex-1 rounded-2xl bg-black px-5 text-white hover:bg-stone-800 sm:flex-none">
                   搜索
                 </Button>
                 <Button
@@ -368,20 +374,20 @@ export default function GalleryPage() {
               当前还没有可展示的公开作品。先在“我的作品”或“图片工作台”中发布几张作品到广场吧。
             </div>
           ) : (
-            <div className="columns-1 gap-4 sm:columns-2 xl:columns-3 2xl:columns-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {works.map((work) => (
                 <article
                   key={work.id}
-                  className="group mb-4 break-inside-avoid overflow-hidden rounded-[26px] border border-stone-200 bg-[#fafaf8] shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(15,23,42,0.09)]"
+                  className="group overflow-hidden rounded-[18px] border border-stone-200 bg-white shadow-[0_8px_22px_rgba(15,23,42,0.08)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(15,23,42,0.12)]"
                 >
                   <div
-                    className="relative cursor-pointer overflow-hidden bg-stone-100"
+                    className="relative aspect-square cursor-pointer overflow-hidden bg-stone-100"
                     onClick={() => void openWork(work)}
                   >
                     <Image
                       src={work.image_url}
                       alt={work.title}
-                      className="block h-auto w-full object-contain transition duration-500 group-hover:scale-[1.015]"
+                      className="block h-full w-full object-cover transition duration-500 group-hover:scale-105"
                     />
                     <button
                       type="button"
@@ -475,70 +481,28 @@ export default function GalleryPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-3 px-4 py-4">
-                    <div className="flex items-center gap-3">
+                  <div className="space-y-2 px-3 py-3">
+                    <div>
+                      <button type="button" className="line-clamp-1 text-left text-sm font-bold tracking-tight text-stone-950" onClick={() => void openWork(work)}>
+                        {work.title}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-stone-500">
                       <PortalAvatar
                         src={work.user_avatar_url}
                         name={work.user_display_name}
                         email={work.user_email}
-                        className="size-10"
+                        className="size-5"
                       />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-stone-900">{getAuthorName(work)}</div>
-                        <div className="truncate text-xs text-stone-500">{maskEmail(work.user_email)}</div>
-                      </div>
+                      <span className="truncate">{getAuthorName(work)}</span>
                     </div>
 
-                    <div>
-                      <button type="button" className="line-clamp-1 text-left text-sm font-semibold tracking-tight text-stone-950" onClick={() => void openWork(work)}>
-                        {work.title}
-                      </button>
-                      <div className="mt-1 text-xs text-stone-500">{formatDate(work.created_at)}</div>
-                    </div>
-
-                    <div className="line-clamp-3 text-sm leading-6 text-stone-600">{work.prompt}</div>
-
-                    <div className="flex items-center gap-3 text-xs text-stone-500">
-                      <span className="inline-flex items-center gap-1">
-                        <Heart className="size-3.5" />
-                        {work.like_count}
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <MessageCircle className="size-3.5" />
-                        {work.comment_count}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 border-t border-stone-200 pt-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className={cn(
-                          "h-9 rounded-full px-3",
-                          work.liked_by_viewer && "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100",
-                        )}
-                        disabled={likingWorkId === work.id}
-                        onClick={() => void handleToggleLike(work.id)}
-                      >
-                        {likingWorkId === work.id ? <LoaderCircle className="size-4 animate-spin" /> : <Heart className="size-4" />}
-                        点赞
-                      </Button>
-                      <Button type="button" variant="outline" className="h-9 rounded-full px-3" onClick={() => void openWork(work)}>
-                        <MessageCircle className="size-4" />
-                        评论
-                      </Button>
-                      <Button type="button" variant="outline" className="h-9 rounded-full px-3" onClick={() => void copyText(work.prompt)}>
-                        <Copy className="size-4" />
-                        复制提示词
-                      </Button>
-                      <a
-                        href={work.image_url}
-                        download={buildDownloadName(work)}
-                        className="inline-flex h-9 items-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
-                      >
-                        <Download className="size-4" />
-                        下载
-                      </a>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 pt-1 text-xs">
+                      <span className="font-semibold text-emerald-600">model</span>
+                      <span className="truncate text-right text-indigo-400">{work.model || "gpt-image-2"}</span>
+                      <span className="text-stone-500">{work.size || "1024x1024"}</span>
+                      <span className="text-right text-stone-500">{formatCardDate(work.created_at)}</span>
                     </div>
                   </div>
                 </article>
