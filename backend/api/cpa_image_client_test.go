@@ -137,6 +137,55 @@ func TestCPAImageClientEditUsesCodexResponsesMaskField(t *testing.T) {
 	}
 }
 
+func TestCPAImageClientEditUsesImagesAPIMultipartImageMIMETypes(t *testing.T) {
+	var seenImageContentType string
+	var seenMaskContentType string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/images/edits" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/v1/images/edits")
+		}
+		reader, err := r.MultipartReader()
+		if err != nil {
+			t.Fatalf("MultipartReader() returned error: %v", err)
+		}
+		for {
+			part, err := reader.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("NextPart() returned error: %v", err)
+			}
+			switch part.FormName() {
+			case "image":
+				seenImageContentType = part.Header.Get("Content-Type")
+			case "mask":
+				seenMaskContentType = part.Header.Get("Content-Type")
+			}
+			_, _ = io.Copy(io.Discard, part)
+			_ = part.Close()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"b64_json":"aW1hZ2U="}]}`)
+	}))
+	defer server.Close()
+
+	client := newCPAImageClient(server.URL, "test-key", 30*time.Second, "images_api")
+	jpegImage := []byte{0xFF, 0xD8, 0xFF, 0x00}
+	pngMask := []byte{0x89, 0x50, 0x4E, 0x47, 0x00, 0x00, 0x00, 0x00}
+	_, err := client.EditImageByUpload(context.Background(), "edit cat", cpaFixedImageModel, [][]byte{jpegImage}, pngMask, "1536x1024", "high")
+	if err != nil {
+		t.Fatalf("EditImageByUpload() returned error: %v", err)
+	}
+	if seenImageContentType != "image/jpeg" {
+		t.Fatalf("image Content-Type = %q, want %q", seenImageContentType, "image/jpeg")
+	}
+	if seenMaskContentType != "image/png" {
+		t.Fatalf("mask Content-Type = %q, want %q", seenMaskContentType, "image/png")
+	}
+}
+
 func TestCPAImageClientAutoFallsBackToCodexResponses(t *testing.T) {
 	var imagesAPICalls int
 	var responsesCalls int

@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -163,7 +164,7 @@ func (c *cpaImageClient) EditImageByUpload(ctx context.Context, prompt, model st
 	}
 
 	for index, image := range images {
-		part, err := writer.CreateFormFile("image", fmt.Sprintf("image-%d.png", index+1))
+		part, err := createCPAImageFormPart(writer, "image", fmt.Sprintf("image-%d.png", index+1), image)
 		if err != nil {
 			return nil, fmt.Errorf("create image form field: %w", err)
 		}
@@ -172,7 +173,7 @@ func (c *cpaImageClient) EditImageByUpload(ctx context.Context, prompt, model st
 		}
 	}
 	if len(mask) > 0 {
-		part, err := writer.CreateFormFile("mask", "mask.png")
+		part, err := createCPAImageFormPart(writer, "mask", "mask.png", mask)
 		if err != nil {
 			return nil, fmt.Errorf("create mask form field: %w", err)
 		}
@@ -206,6 +207,39 @@ func (c *cpaImageClient) EditImageByUpload(ctx context.Context, prompt, model st
 		return nil, fmt.Errorf("images_api failed: %v; codex_responses fallback failed: %w", parseErr, fallbackErr)
 	}
 	return results, parseErr
+}
+
+func createCPAImageFormPart(writer *multipart.Writer, fieldName, fileName string, data []byte) (io.Writer, error) {
+	mediaType, err := detectCPAUploadMIME(data)
+	if err != nil {
+		return nil, err
+	}
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, fieldName, fileName))
+	header.Set("Content-Type", mediaType)
+	return writer.CreatePart(header)
+}
+
+func detectCPAUploadMIME(data []byte) (string, error) {
+	if len(data) >= 8 {
+		if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+			return "image/png", nil
+		}
+		if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+			return "image/jpeg", nil
+		}
+		if len(data) >= 12 && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46 && data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50 {
+			return "image/webp", nil
+		}
+	}
+	if len(data) >= 6 && (bytes.Equal(data[:6], []byte("GIF87a")) || bytes.Equal(data[:6], []byte("GIF89a"))) {
+		return "image/gif", nil
+	}
+	mediaType := strings.TrimSpace(http.DetectContentType(data))
+	if strings.HasPrefix(mediaType, "image/") {
+		return mediaType, nil
+	}
+	return "", fmt.Errorf("unsupported image mime type %q", mediaType)
 }
 
 func (c *cpaImageClient) InpaintImageByMask(
